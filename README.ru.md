@@ -35,7 +35,7 @@ irm https://raw.githubusercontent.com/vladtvoeit/brave-debloat/main/windows/brav
 |---|---|
 | Крипта и деньги | Rewards / BAT, Wallet, web3 |
 | Апселлы | Кнопка Brave VPN и предложения подписки |
-| ИИ | Leo — панель в сайдбаре и подсказки в адресной строке |
+| ИИ | Leo — панель в сайдбаре и подсказки в адресной строке; локальный ИИ на устройстве |
 | Контентные функции | Лента новостей, Talk, Playlist, Speedreader, Wayback Machine |
 | Сети | Окна Tor, IPFS |
 | Телеметрия Brave | Аналитика P3A, ежедневный usage-ping, Web Discovery |
@@ -44,7 +44,7 @@ irm https://raw.githubusercontent.com/vladtvoeit/brave-debloat/main/windows/brav
 | Privacy Sandbox | Рекламный механизм самого Chromium — измерения, запросы, реклама от сайтов |
 | Сеть | Prefetch / prerender, служба проверки орфографии |
 
-Всего 26 политик плюс набор настроек профиля для кнопок на тулбаре,
+Всего 27 политик плюс набор настроек профиля для кнопок на тулбаре,
 у которых эквивалента среди политик нет.
 
 **Не трогается:** Shields, блокировщик рекламы, автообновления, синхронизация,

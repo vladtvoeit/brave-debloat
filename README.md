@@ -35,7 +35,7 @@ Restart Brave afterwards. On macOS there is one manual step — see
 |---|---|
 | Crypto & money | Rewards / BAT, Wallet, web3 |
 | Upsells | Brave VPN button and subscription prompts |
-| AI | Leo — sidebar panel and omnibox suggestions |
+| AI | Leo — sidebar panel and omnibox suggestions; on-device local AI |
 | Content features | News feed, Talk, Playlist, Speedreader, Wayback Machine |
 | Networks | Tor windows, IPFS |
 | Brave telemetry | P3A analytics, daily usage ping, Web Discovery |
@@ -44,7 +44,7 @@ Restart Brave afterwards. On macOS there is one manual step — see
 | Privacy Sandbox | Chromium's own ad-targeting stack — measurement, prompts, site-enabled ads |
 | Network | Prefetch / prerender, spell-check service |
 
-26 policies in total, plus a set of profile preferences for toolbar buttons
+27 policies in total, plus a set of profile preferences for toolbar buttons
 that have no policy equivalent.
 
 **Not touched:** Shields, the ad blocker, auto-updates, sync, passwords,

@@ -165,10 +165,16 @@ function Update-PrefsFile {
         $json = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
         $doc  = $json | ConvertFrom-Json
     } catch {
-        # This is where PowerShell 5.1's ConvertFrom-Json gives out, and it
-        # does so on things Chromium legitimately writes: an empty-string
-        # dictionary key, keys differing only in case, and anything past the
-        # 2 MB JavaScriptSerializer limit.
+        # Where PowerShell 5.1's ConvertFrom-Json gives out. Measured on
+        # 5.1.26100: an empty-string dictionary key and two keys differing
+        # only in case both throw, because the cmdlet builds a PSCustomObject
+        # and property names there are case-insensitive and cannot be empty.
+        # A 3 MB document parses fine, so the 2 MB limit often cited for this
+        # does not apply to reading. No real Brave profile has been seen to
+        # contain either construct; if one turns up, the fix is to deserialise
+        # into a dictionary rather than a PSCustomObject -- on 5.1 via
+        # JavaScriptSerializer, which PowerShell 7 does not have and does not
+        # need.
         Write-Warn "NOT PATCHED - $(Get-RelativePath $Path): $($_.Exception.Message)"
         return
     }

@@ -104,6 +104,14 @@ the same dead ends are not explored twice.
   were hit:
   - `ConvertTo-Json` defaults to `-Depth 2`; anything deeper is flattened into
     a string. `-Depth 100` is required.
+  - `ConvertFrom-Json` throws on an empty-string key and on keys differing
+    only in case, because it builds a `PSCustomObject`. Both measured on
+    5.1.26100. The 2 MB limit widely cited alongside them is not real for
+    reading — a 3 MB document parses. Three reviews in a row proposed
+    rewriting this layer onto `JavaScriptSerializer` to escape all three;
+    a scan of a real profile found zero occurrences of either construct, so
+    the rewrite buys nothing and costs a second code path, since PowerShell 7
+    has no `JavaScriptSerializer` and no such limitation either.
   - A UTF-8 BOM makes Chromium refuse the file. Write with
     `UTF8Encoding($false)`, not `Set-Content -Encoding UTF8`.
   - `[IO.File]::Replace($tmp, $path, $null)` throws *"the path is not of a

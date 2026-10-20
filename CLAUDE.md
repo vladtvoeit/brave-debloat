@@ -17,11 +17,16 @@ the same dead ends are not explored twice.
   over. A profile is the only durable route. Do not reintroduce a direct
   write, and do not add a LaunchAgent that rewrites the plist on a timer —
   that is a workaround for a problem that has a correct solution.
-- **macOS keeps a second layer in the user preference domain**
-  (`defaults write com.brave.Browser`). Brave reads it, no admin rights are
-  needed, and it survives if the profile is ever removed. It is weaker:
-  without a profile these load as *recommended* rather than *mandatory*, so it
-  is a fallback, not a replacement.
+- **The macOS user-domain layer (`defaults write com.brave.Browser`) does not
+  substitute for the profile, and barely helps at all.** Values written there
+  are not `Forced`, so Chromium loads them at *recommended* level — and every
+  Brave policy declares `can_be_recommended: false`, while the code paths
+  (`brave_rewards::IsDisabledByPolicy` and friends) require
+  `IsManagedPreference()`, which is false for recommended values. Rewards,
+  Wallet, Leo and News are therefore **not** disabled by this layer. It is
+  kept only for upstream Chromium policies that do accept the recommended
+  level. The configuration profile is required, not optional — never present
+  `--no-profile` as an equivalent route.
 - **Windows writes to the registry, and that is durable.** `HKLM` and `HKCU`
   under `SOFTWARE\Policies\BraveSoftware\Brave` both survive `gpupdate /force`
   (verified 2026-10-20), so the macOS problem has no Windows equivalent.
@@ -120,6 +125,13 @@ the same dead ends are not explored twice.
   profile patching outright on Windows, via `[IO.File]::Replace`. The output
   said `skipped`, which reads as harmless; it was caught only by checking an
   actual preference value after the run. Verify effects, not exit status.
+- **2026-10-20** — a third review found that the fix for the previous entry
+  was itself unsound: verifying names with `gh search code` produced two more
+  fictional keys (`brave.today.enabled`, see the rule above) and deleted a
+  real one. It also caught that the atomic-write change had been dropping
+  `Preferences` from Brave's `0600` to a world-readable `0644`, since
+  `os.replace` carries the temp file's mode. Two rounds of "verification"
+  before anything was actually verified.
 - **2026-10-20** — a second review found that most of the profile preference
   layer was writing key names that do not exist in `brave-core` — inherited
   from the script this project grew out of and never checked, including every

@@ -306,10 +306,12 @@ PROFILE = {
     # Chromium stores only prefs that differ from their default, so an
     # invented key and an untouched real key look identical on disk.
     "brave.new_tab_page.show_brave_news": False,
-    "brave.today.enabled": False,
-    "brave.rewards.show_brave_rewards_button": False,
+    "brave.today.opted_in": False,
+    "brave.today.should_show_toolbar_button": False,
+    "brave.rewards.show_brave_rewards_button_in_location_bar": False,
     "brave.rewards.enabled": False,
     "brave.wallet.show_wallet_icon_on_toolbar": False,
+    "brave.brave_vpn.show_button": False,
     "brave.ai_chat.show_toolbar_button": False,
     "brave.ai_chat.autocomplete_provider_enabled": False,
     "brave.playlist.enabled": False,
@@ -330,6 +332,7 @@ if sponsored:
 
 LOCAL_STATE = {
     "brave.p3a.enabled": False,
+    "brave.p3a.notice_acknowledged": True,
     "brave.stats.reporting_enabled": False,
 }
 
@@ -360,6 +363,9 @@ def patch(path, prefs):
         tmp = f"{path}.tmp-{ts}"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(doc, fh, ensure_ascii=False)
+        # os.replace carries the temp file's mode across, and under the usual
+        # umask that would turn Brave's 0600 into a world-readable 0644.
+        shutil.copymode(path, tmp)
         os.replace(tmp, path)
     except Exception as exc:
         tmp = f"{path}.tmp-{ts}"

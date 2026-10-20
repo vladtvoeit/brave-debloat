@@ -78,8 +78,11 @@ toolbar button visibility. Those are patched directly in the profile's
 `Preferences` and `Local State` files, with timestamped backups.
 
 On macOS the script also writes the same policy values into the user
-preference domain (`defaults write com.brave.Browser`). That needs no admin
-rights and acts as a fallback if the configuration profile is ever removed.
+preference domain (`defaults write com.brave.Browser`). Treat this as a minor
+extra, not a second route: values there load at *recommended* level, and
+Brave's own policies refuse that level, so Rewards, Wallet, Leo and News stay
+on without the configuration profile. Only upstream Chromium policies that
+accept being recommended take effect this way.
 
 ---
 

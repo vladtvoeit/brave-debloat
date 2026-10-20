@@ -273,10 +273,12 @@ if (-not (Test-Path -LiteralPath $DataDir)) {
     # invented key and an untouched real key look identical on disk.
     $profilePrefs = @{
         'brave.new_tab_page.show_brave_news'          = $false
-        'brave.today.enabled'                         = $false
-        'brave.rewards.show_brave_rewards_button'     = $false
+        'brave.today.opted_in'                        = $false
+        'brave.today.should_show_toolbar_button'      = $false
+        'brave.rewards.show_brave_rewards_button_in_location_bar' = $false
         'brave.rewards.enabled'                       = $false
         'brave.wallet.show_wallet_icon_on_toolbar'    = $false
+        'brave.brave_vpn.show_button'                 = $false
         'brave.ai_chat.show_toolbar_button'           = $false
         'brave.ai_chat.autocomplete_provider_enabled' = $false
         'brave.playlist.enabled'                      = $false
@@ -295,8 +297,9 @@ if (-not (Test-Path -LiteralPath $DataDir)) {
     }
 
     $localState = @{
-        'brave.p3a.enabled'              = $false
-        'brave.stats.reporting_enabled'  = $false
+        'brave.p3a.enabled'               = $false
+        'brave.p3a.notice_acknowledged'   = $true
+        'brave.stats.reporting_enabled'   = $false
     }
 
     Get-ChildItem -LiteralPath $DataDir -Directory -ErrorAction SilentlyContinue |

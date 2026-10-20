@@ -192,7 +192,8 @@ curl -fsSL https://raw.githubusercontent.com/vladtvoeit/brave-debloat/main/macos
   организация тут вы сами.
 - Запущенный из файла, Windows-скрипт сам запрашивает повышение прав через
   UAC. Через `iex` это невозможно, поэтому откройте PowerShell от
-  администратора заранее либо используйте `-UserOnly`.
+  администратора заранее. `-UserOnly` обойти это не поможет: ветку
+  `HKCU\SOFTWARE\Policies` Windows тоже закрывает от обычных пользователей.
 
 ## Проверено на
 

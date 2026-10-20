@@ -73,6 +73,19 @@ warn() { printf '   \033[33m!\033[0m %s\n' "$1"; }
 
 # True only if macOS has already materialised every expected policy from an
 # installed profile, with matching values.
+# No pipe into grep: grep -q exits at the first match, the producer takes
+# SIGPIPE, and pipefail reports that as failure. Documented as a trap and then
+# reintroduced here anyway, so it now lives in one function used by both
+# callers.
+profile_installed() {
+  local out
+  out="$(system_profiler SPConfigurationProfileDataType 2>/dev/null)" || return 1
+  case "$out" in
+    *com.local.brave-debloat*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 profile_is_current() {
   # The plist in /Library/Managed Preferences is merged from every installed
   # profile, so comparing against it exactly would call ours out of date on a
@@ -88,6 +101,7 @@ profile_is_current() {
     return 1
   fi
 
+  rc=0
   python3 -c '
 import json, re, sys
 
@@ -113,7 +127,7 @@ installed = set()
 for profile in profiles(json.load(open(payload_path))):
     for item in profile.get("_items", []):
         blob = item.get("spconfigprofile_payload_data", "")
-        installed |= set(re.findall(r"^\s*\"?([A-Za-z][A-Za-z0-9]*)\"?\s*=\s*", blob, re.M))
+        installed |= set(re.findall(r"^\s*\"?([A-Za-z][A-Za-z0-9_]*)\"?\s*=\s*", blob, re.M))
 installed -= {"PayloadContent", "Forced", "mcx_preference_settings"}
 
 if not installed or installed != set(expected):
@@ -125,8 +139,7 @@ for key, want in expected.items():
     if type(got) is not type(want) or got != want:
         sys.exit(1)
 sys.exit(0)
-' "$spfile" "$livefile" "${POLICIES[@]}"
-  rc=$?
+' "$spfile" "$livefile" "${POLICIES[@]}" || rc=$?
   rm -f "$spfile" "$livefile"
   return $rc
 }
@@ -194,8 +207,7 @@ if [ "$WANT_UNINSTALL" = "1" ]; then
   bold "Configuration profile"
   echo "   Remove it by hand: System Settings → General → Device Management"
   echo "   → \"Brave Debloat\" → remove."
-  if system_profiler SPConfigurationProfileDataType 2>/dev/null \
-     | grep -q "com.local.brave-debloat"; then
+  if profile_installed; then
     open "x-apple.systempreferences:com.apple.Profiles-Settings.extension" 2>/dev/null || true
   fi
   echo
@@ -288,6 +300,7 @@ MID2
       case "$t" in
         bool)    [ "$v" = "true" ] && printf '<true/>\n' || printf '<false/>\n' ;;
         integer) printf '<integer>%s</integer>\n' "$v" ;;
+        *) echo "unknown policy type: $t" >&2; exit 1 ;;
       esac
     done
     cat <<'TAIL'
@@ -335,6 +348,7 @@ for entry in "${POLICIES[@]}"; do
   case "$t" in
     bool)    defaults write "$DOMAIN" "$k" -bool "$v" ;;
     integer) defaults write "$DOMAIN" "$k" -int "$v" ;;
+    *) echo "unknown policy type: $t" >&2; exit 1 ;;
   esac
 done
 ok "${#POLICIES[@]} keys written to $DOMAIN"

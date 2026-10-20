@@ -118,7 +118,7 @@ function Request-Elevation {
     param([string[]]$Arguments)
 
     if (-not $PSCommandPath) {
-        throw 'Machine-wide policies need administrator rights, and this script was piped in rather than saved, so it cannot relaunch itself. Either open PowerShell as administrator and run the same command again, or pass -UserOnly to write user-level policies instead.'
+        throw 'Policies need administrator rights, and this script was piped in rather than saved, so it cannot relaunch itself. Open PowerShell as administrator and run the same command again. (-UserOnly does not avoid this: Windows restricts HKCU\SOFTWARE\Policies to administrators as well; it only changes the scope from machine-wide to this account.)'
     }
 
     Write-Head 'Requesting administrator rights (UAC)'
@@ -250,6 +250,13 @@ function Update-PrefsFile {
 # -----------------------------------------------------------------------------
 #  Uninstall
 # -----------------------------------------------------------------------------
+# Before anything else, including closing the browser: -UserOnly reaches a
+# hive only administrators may write, and discovering that after Brave has
+# been shut down helps nobody.
+if ($UserOnly -and -not (Test-Admin)) {
+    throw 'HKCU\SOFTWARE\Policies is writable only by administrators, so -UserOnly needs an elevated session too. It is not auto-elevated: if you supply a different admin account, the policies would land in that account''s hive instead of yours.'
+}
+
 if ($Uninstall) {
     # HKCU must be cleared before elevating: a standard user who types a
     # separate admin's password gets that admin's hive afterwards, and their
@@ -330,25 +337,41 @@ if ($brave) {
     # CloseMainWindow closes one window; with several open, the next becomes
     # the main one, so this keeps asking until they are gone. Brave flushes
     # Preferences on exit and killing it mid-write corrupts profiles.
-    $hadWindow = @($brave | Where-Object { $_.MainWindowHandle -ne 0 }).Count -gt 0
     $deadline = (Get-Date).AddSeconds(10)
-    while ($hadWindow -and (Get-Date) -lt $deadline) {
+    while ((Get-Date) -lt $deadline) {
         $procs = @(Get-Process -Name 'brave' -ErrorAction SilentlyContinue |
                    Where-Object { $_.SessionId -eq $sessionId })
         if (-not $procs) { break }
+
+        $windowed = @()
         foreach ($proc in $procs) {
             # The process can exit between Get-Process and here, and
             # $ErrorActionPreference = 'Stop' would make that fatal.
             try {
                 $proc.Refresh()
-                if ($proc.MainWindowHandle -ne 0) { $proc.CloseMainWindow() | Out-Null }
+                if ($proc.MainWindowHandle -ne 0) { $windowed += $proc }
             } catch { }
+        }
+
+        # Whatever is left has no window to close - background mode. Asking
+        # again for the rest of the ten seconds achieves nothing.
+        if (-not $windowed) { break }
+        foreach ($proc in $windowed) {
+            try { $proc.CloseMainWindow() | Out-Null } catch { }
         }
         Start-Sleep -Milliseconds 300
     }
-    # A window closing frees its handle before the browser finishes flushing
-    # Preferences, so give it a moment rather than killing mid-write.
-    if ($hadWindow) { Start-Sleep -Seconds 2 }
+
+    # A window closing frees its handle before Brave finishes flushing
+    # Preferences, so allow a grace period rather than killing mid-write -
+    # and stop as soon as the processes are gone instead of always sleeping
+    # it out.
+    $grace = (Get-Date).AddSeconds(3)
+    while ((Get-Date) -lt $grace) {
+        if (-not @(Get-Process -Name 'brave' -ErrorAction SilentlyContinue |
+                   Where-Object { $_.SessionId -eq $sessionId })) { break }
+        Start-Sleep -Milliseconds 200
+    }
 
     $still = @(Get-Process -Name 'brave' -ErrorAction SilentlyContinue |
                Where-Object { $_.SessionId -eq $sessionId })
@@ -370,10 +393,6 @@ if ($brave) {
 # -----------------------------------------------------------------------------
 #  1. Registry policies
 # -----------------------------------------------------------------------------
-if ($UserOnly -and -not (Test-Admin)) {
-    throw 'HKCU\SOFTWARE\Policies is writable only by administrators, so -UserOnly needs an elevated session too. It is not auto-elevated: if you supply a different admin account, the policies would land in that account''s hive instead of yours.'
-}
-
 Write-Head 'Applying policies'
 if (-not (Test-Path $PolicyKey)) { New-Item -Path $PolicyKey -Force | Out-Null }
 foreach ($name in $Policies.Keys) {

@@ -37,8 +37,8 @@ the same dead ends are not explored twice.
 - **Windows writes to the registry, and that is durable.** `HKLM` and `HKCU`
   under `SOFTWARE\Policies\BraveSoftware\Brave` both survive `gpupdate /force`
   (verified 2026-10-20), so the macOS problem has no Windows equivalent.
-  `-UserOnly` writing to `HKCU` is a real option for machines without admin
-  rights, not a degraded one.
+  `-UserOnly` is about scope — this account rather than the machine — and is
+  no less durable, but see below: it needs administrator rights all the same.
 - **Every profile preference name is verified against `brave-core` before it
   is added.** A wrong name is completely silent: Chromium persists only prefs
   that differ from their default, so an invented key and a real key nobody has
@@ -122,7 +122,11 @@ the same dead ends are not explored twice.
     `[Environment]::CurrentDirectory` is involved. Either pass
     `[NullString]::Value` or, as here, use `Move-Item -Force` — a single
     rename on one volume, with no null to bind.
-- **`set -o pipefail` plus `grep -q` is a trap.** `grep -q` exits at the
+- **`set -o pipefail` plus `grep -q` is a trap**, and knowing it is not
+  enough: it was documented here and then written again two rounds later, in
+  the `--uninstall` path, where a Mac with enough profiles would have stopped
+  opening the Profiles pane. Both callers now go through one `profile_installed`
+  helper that captures the output first. `grep -q` exits at the
   first match, the producer takes `SIGPIPE`, and the pipeline reports 141 —
   so a successful search reads as a failure. It bit `profile_is_current`,
   where it would have meant "profile not installed" on any Mac with enough

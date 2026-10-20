@@ -191,7 +191,8 @@ curl -fsSL https://raw.githubusercontent.com/vladtvoeit/brave-debloat/main/macos
   is expected — the organisation is you.
 - Run from a script file, the Windows version requests elevation itself via
   UAC. Piped through `iex` it cannot, so start an administrator PowerShell
-  first, or use `-UserOnly`.
+  first. `-UserOnly` is not a way around this — Windows restricts
+  `HKCU\SOFTWARE\Policies` to administrators too.
 
 ## Tested on
 

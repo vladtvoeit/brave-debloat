@@ -61,8 +61,12 @@ PREF = re.compile(r"""["']([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)["']""")
 PY_ENTRY = re.compile(r'"([a-z][a-z0-9_.]*)"\s*:\s*(True|False)')
 PS_ENTRY = re.compile(r"'([a-z][a-z0-9_.]*)'\s*=\s*\$(true|false)", re.I)
 PS_INDEXED = re.compile(r"\$profilePrefs\['([a-z][a-z0-9_.]*)'\]\s*=\s*\$(true|false)", re.I)
-MAC_POLICY = re.compile(r'"([A-Za-z][A-Za-z0-9]+)\|(bool|integer)\|(\w+)"')
-WIN_POLICY = re.compile(r"^\s{4}([A-Za-z][A-Za-z0-9]+)\s*=\s*(\d+)", re.M)
+# The value is matched literally rather than as \w+, so a typo in true/false
+# fails to parse instead of quietly becoming false.
+MAC_POLICY = re.compile(r'"([A-Za-z][A-Za-z0-9]+)\|(bool|integer)\|(true|false|\d+)"')
+# Indentation is not anchored: these are matched inside the extracted
+# $Policies block, so there is nothing else in range to match.
+WIN_POLICY = re.compile(r"^\s*([A-Za-z][A-Za-z0-9]+)\s*=\s*(\d+)", re.M)
 
 
 def fetch(path):
@@ -90,7 +94,7 @@ def strict(block, pattern, where, failures):
             continue
         if not pattern.search(line):
             failures.append(f"{where}: cannot parse line: {line}")
-    return dict(pattern.findall(block))
+    return pattern.findall(block)
 
 
 def grouped_prefs(mac, win, failures):
@@ -101,7 +105,7 @@ def grouped_prefs(mac, win, failures):
 
     def group(text, opener, closer, pattern, where):
         raw = strict(between(text, opener, closer), pattern, where, failures)
-        return {k: to_bool(v) for k, v in raw.items()}
+        return {k: to_bool(v) for k, v in raw}
 
     mac_groups = {
         "profile": group(mac, "PROFILE = {", "\n}", PY_ENTRY, "macOS PROFILE"),
@@ -170,12 +174,20 @@ def main():
     # Values matter as much as names: half these policies are *Disabled, where
     # off is 1, and half are *Enabled, where off is 0. A single transposed
     # digit silently turns a feature back on.
+    # Parsed strictly, like the pref blocks: findall over the whole file would
+    # skip a malformed entry instead of reporting it, and MAC_POLICY treats any
+    # value that is not "true" as false, so a typo in the literal would pass.
+    mac_policy_block = between(mac, "POLICIES=(", "\n)")
+    win_policy_block = between(win, "$Policies = [ordered]@{", "\n}")
+    strict(mac_policy_block, MAC_POLICY, "macOS POLICIES", failures)
+    strict(win_policy_block, WIN_POLICY, "Windows Policies", failures)
+
     mac_policy_values = {
         name: (1 if value == "true" else 0) if kind == "bool" else int(value)
-        for name, kind, value in MAC_POLICY.findall(mac)
+        for name, kind, value in MAC_POLICY.findall(mac_policy_block)
     }
-    mac_policy_kinds = {name: kind for name, kind, _ in MAC_POLICY.findall(mac)}
-    win_policy_values = {name: int(value) for name, value in WIN_POLICY.findall(win)}
+    mac_policy_kinds = {name: kind for name, kind, _ in MAC_POLICY.findall(mac_policy_block)}
+    win_policy_values = {name: int(value) for name, value in WIN_POLICY.findall(win_policy_block)}
 
     for name in sorted(set(mac_policy_values) | set(win_policy_values)):
         if name not in win_policy_values:

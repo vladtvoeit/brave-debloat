@@ -155,8 +155,15 @@ function Update-PrefsFile {
         $out = $doc | ConvertTo-Json -Depth 100 -Compress
         $tmp = "$Path.tmp-$Stamp"
         [IO.File]::WriteAllText($tmp, $out, (New-Object Text.UTF8Encoding $false))
-        [IO.File]::Replace($tmp, $Path, $null)
+
+        # Move-Item -Force, not [IO.File]::Replace: the latter rejects a null
+        # backup path on .NET Framework with "the path is not of a legal form".
+        # On one volume this is a single rename, which is what we need.
+        Move-Item -LiteralPath $tmp -Destination $Path -Force
     } catch {
+        if ($tmp -and (Test-Path -LiteralPath $tmp)) {
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        }
         Write-Warn "skipped $(Split-Path $Path -Leaf): $($_.Exception.Message)"
         return
     }

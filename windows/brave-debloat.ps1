@@ -204,8 +204,10 @@ function Update-PrefsFile {
         #
         # -LiteralPath with -Filter, not a wildcard path: a profile directory
         # may contain [ or ], which PowerShell would read as a range.
-        $dir  = Split-Path -LiteralPath $Path
-        $leaf = Split-Path -LiteralPath $Path -Leaf
+        # [IO.Path], not Split-Path: in PowerShell 5.1 -LiteralPath and -Leaf
+        # sit in different parameter sets, so combining them fails to bind.
+        $dir  = [IO.Path]::GetDirectoryName($Path)
+        $leaf = [IO.Path]::GetFileName($Path)
         $stamped = @(Get-ChildItem -LiteralPath $dir -Filter "$leaf.bak-2*" -ErrorAction SilentlyContinue |
                      Sort-Object Name)
         $initial = "$Path.bak-initial"
@@ -251,15 +253,28 @@ if ($Uninstall) {
     # own user-level policies would survive untouched.
     $hkcu = 'HKCU:\SOFTWARE\Policies\BraveSoftware\Brave'
     if (-not $UserOnly -and -not (Test-Admin) -and (Test-Path $hkcu)) {
+        # Windows restricts HKCU\Software\Policies to administrators, so an
+        # unelevated process cannot delete here. Try anyway -- it succeeds for
+        # an admin whose token is merely unelevated -- and fall through to the
+        # elevated pass when it does not.
         $n = 0
-        foreach ($name in $Policies.Keys) {
-            if ($null -ne (Get-ItemProperty -Path $hkcu -Name $name -ErrorAction SilentlyContinue)) {
-                Remove-ItemProperty -Path $hkcu -Name $name -Force
-                $n++
+        try {
+            foreach ($name in $Policies.Keys) {
+                if ($null -ne (Get-ItemProperty -Path $hkcu -Name $name -ErrorAction SilentlyContinue)) {
+                    Remove-ItemProperty -Path $hkcu -Name $name -Force
+                    $n++
+                }
             }
+        } catch {
+            Write-Warn "cannot clear $hkcu without elevation - leaving it to the elevated pass"
+            $n = -1
         }
-        if ($n) { Write-Ok "$hkcu - $n removed (before elevating)" }
-        $script:HkcuCleared = $n
+        if ($n -gt 0) {
+            Write-Ok "$hkcu - $n removed (before elevating)"
+            $script:HkcuCleared = $n
+        } elseif ($n -eq 0) {
+            $script:HkcuCleared = 0
+        }
         if (-not @((Get-Item $hkcu).Property).Count -and
             -not @(Get-ChildItem $hkcu -ErrorAction SilentlyContinue).Count) {
             Remove-Item -Path $hkcu -Force

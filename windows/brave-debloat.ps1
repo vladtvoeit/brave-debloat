@@ -270,11 +270,14 @@ function Update-PrefsFile {
 
         Move-Item -LiteralPath $tmp -Destination $Path -Force
     } catch {
+        Write-Warn "NOT PATCHED - $(Get-RelativePath $Path): $($_.Exception.Message)"
+        return
+    } finally {
+        # finally, not catch: Ctrl+C skips catch but still runs this. After a
+        # successful move there is nothing left at this path.
         if ($tmp -and (Test-Path -LiteralPath $tmp)) {
             Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
         }
-        Write-Warn "NOT PATCHED - $(Get-RelativePath $Path): $($_.Exception.Message)"
-        return
     }
 
     Write-Ok (Get-RelativePath $Path)

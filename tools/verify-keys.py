@@ -43,6 +43,12 @@ HEADERS = [
 UPSTREAM_PREFS = {
     "browser.check_default_browser",
 }
+# Retired in brave-core but written on purpose. The sponsored-images pref was
+# superseded by brave.brave_ads.sponsored.enabled in 08/2026 and is still
+# migrated into it, so it keeps older builds covered.
+DEPRECATED_PREFS = {
+    "brave.new_tab_page.show_branded_background_image",
+}
 # Upstream Chromium, so absent from brave-core and unable to be checked
 # against a YAML there. The expected type is recorded here instead, because
 # nothing else would catch one being written as the wrong kind: the
@@ -109,6 +115,41 @@ def strip_cpp_comments(body):
     thing the weekly CI run exists to notice.
     """
     return CPP_COMMENT.sub("", body)
+
+
+RETIRED = ("deprecat", "obsolete")
+
+
+def find_retired(body):
+    """Pref names that brave-core has marked rather than deleted.
+
+    Tied to the C++ statement, not the line. Marking by line gets it wrong
+    twice over: a note at the end of one declaration carries into the next, and
+    a note above a declaration that clang-format split across two lines is lost
+    before the string literal is reached. Ten of the twenty prefs used here are
+    written that way.
+    """
+    retired = set()
+    pending = False
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            pending = False
+            continue
+
+        if stripped.startswith("//"):
+            if any(word in stripped.lower() for word in RETIRED):
+                pending = True
+            continue
+
+        code, _, comment = line.partition("//")
+        if any(word in (code + comment).lower() for word in RETIRED):
+            pending = True
+        if pending:
+            retired.update(PREF.findall(code))
+        if ";" in code:
+            pending = False
+    return retired
 
 
 def between(text, opener, closer):
@@ -210,15 +251,7 @@ def main():
             return 1
         known.update(PREF.findall(strip_cpp_comments(body)))
 
-        # brave-core retires a pref by marking it rather than deleting it, so
-        # the name stays harvestable and nothing here would notice. Flag the
-        # ones annotated on their own line or the one above.
-        previous = ""
-        for line in body.splitlines():
-            if "deprecat" in (line + previous).lower():
-                deprecated.update(PREF.findall(line))
-            if line.strip():
-                previous = line
+        deprecated |= find_retired(body)
     print(f"  {len(known)} pref names read from {len(HEADERS)} brave-core files")
 
     # Neither bash -n nor shellcheck looks inside a quoted heredoc, so a
@@ -286,10 +319,10 @@ def main():
     for name in sorted(mac_prefs | win_prefs):
         if name not in known:
             failures.append(f"pref does not exist in brave-core: {name}")
-        elif name in deprecated:
+        elif name in deprecated and name not in DEPRECATED_PREFS:
             failures.append(
-                f"pref {name} is marked deprecated in brave-core — keep it "
-                f"deliberately and say so, or drop it"
+                f"pref {name} is marked deprecated or obsolete in brave-core "
+                f"— drop it, or add it to DEPRECATED_PREFS with a reason"
             )
 
     # Values matter as much as names: half these policies are *Disabled, where

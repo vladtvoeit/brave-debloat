@@ -230,11 +230,18 @@ it was written to catch.
 Behaviour is still only verified by running the scripts.
 
 PowerShell cannot be run on macOS, so Windows changes are written blind and
-must be exercised on a real machine. Confirm every edit actually landed: two
-fixes were lost to a search-and-replace that matched nothing, and neither was
-noticed until the next review. (That particular trap came from typographic
-dashes in the file; it is now kept strictly ASCII, enforced by
-`verify-keys.py`, for the separate encoding reason above.)
+must be exercised on a real machine.
+
+Confirm every edit actually landed, and confirm it by reading the file rather
+than by trusting the tool that made it. Work has been lost that way three
+times. Twice a search-and-replace matched nothing, because the file used
+typographic dashes where the pattern assumed hyphens — the file is kept
+strictly ASCII now, enforced by `verify-keys.py`, though for the encoding
+reason above rather than this one. The third time a batch of five edits saved
+only at the end, so an assertion on the last discarded the four that had
+succeeded, and the commit message went on to list fixes that were not in the
+commit. That is worse than missing them: it is a false record, and the next
+review is what caught it.
 
 - **macOS** — run in a sandbox with `open`, `osascript`, `pkill`,
   `system_profiler` and `defaults` stubbed on `PATH`, with `HOME` and `TMPDIR` redirected. That

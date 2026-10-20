@@ -30,7 +30,10 @@ DOMAIN="com.brave.Browser"
 APP="Brave Browser"
 DATA="$HOME/Library/Application Support/BraveSoftware/Brave-Browser"
 MANAGED="/Library/Managed Preferences/com.brave.Browser.plist"
-PROFILE_OUT="${TMPDIR:-/tmp}/brave-debloat.mobileconfig"
+# TMPDIR on macOS ends in a slash, which would otherwise appear doubled in
+# the path printed to the user.
+PROFILE_OUT="${TMPDIR:-/tmp}"
+PROFILE_OUT="${PROFILE_OUT%/}/brave-debloat.mobileconfig"
 TS="$(date +%Y%m%d-%H%M%S)"
 BRAVE_ALIVE=0
 # current | queued | skipped. `open` on the profile returns immediately, long
@@ -487,24 +490,33 @@ def patch(path, prefs):
             deep_set(doc, key, value)
         # Write-then-rename: open(path, "w") truncates immediately, so a
         # failure mid-serialisation would leave an empty Preferences file.
-        with open(tmp, "w", encoding="utf-8") as fh:
+        #
+        # 0600 from the moment it exists: until the rename this file holds the
+        # whole of Preferences, and the default umask would leave that
+        # readable by every local account.
+        handle = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with open(handle, "w", encoding="utf-8") as fh:
             json.dump(doc, fh, ensure_ascii=False)
         # Only now that the replacement exists on disk is it safe to touch the
         # backups. Rotating first meant two failed runs in a row could discard
         # both surviving copies while writing nothing.
         keep_backups(path)
-        # os.replace carries the temp file's mode across, and under the usual
-        # umask that would turn Brave's 0600 into a world-readable 0644.
+        # Match the original exactly, in case Brave used something other
+        # than 0600; os.replace carries the temp file's mode across.
         shutil.copymode(path, tmp)
         os.replace(tmp, path)
     except Exception as exc:
+        print(f"   ! NOT PATCHED {os.path.relpath(path, data)}: {exc}")
+        return
+    finally:
+        # finally, not except: Ctrl+C raises KeyboardInterrupt, which is not
+        # an Exception and would otherwise leave the temp file behind. After a
+        # successful replace there is nothing at this path to remove.
         if os.path.exists(tmp):
             try:
                 os.unlink(tmp)
             except OSError:
                 pass
-        print(f"   ! skipped {os.path.relpath(path, data)}: {exc}")
-        return
     print(f"   \033[32m✔\033[0m {os.path.relpath(path, data)}")
 
 
@@ -548,9 +560,14 @@ case "$PROFILE_STATE" in
     echo "           brave://settings  — Rewards / Wallet / VPN / Leo are gone"
     ;;
   *)
-    if profile_installed; then
+    if profile_is_current; then
       echo "  Verify:  brave://policy    — every policy listed, status OK"
       echo "           brave://settings  — Rewards / Wallet / VPN / Leo are gone"
+    elif profile_installed; then
+      # Installed but not matching: --no-profile left it alone, so what is in
+      # effect is the old set of policies, not the one just written.
+      warn "the installed configuration profile is out of date"
+      echo "     Re-run without --no-profile to rebuild and reinstall it."
     else
       # Without the profile the Brave policies do not apply at all, so
       # promising that brave://policy looks clean would be a lie.

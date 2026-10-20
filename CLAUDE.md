@@ -378,6 +378,3 @@ What no check or run has covered, so that nobody mistakes silence for a pass.
   Brave with `--user-data-dir` pointing at an empty temporary directory
   (policies apply machine-wide) and compare toolbar and new-tab page. Skipped on
   2026-10-21 by decision, not because it was tried and failed.
-- Backup pruning after a successful replace on Windows (commit `542e67b`): the
-  macOS side is covered by the smoke run, the Windows side has not been run
-  since the change.

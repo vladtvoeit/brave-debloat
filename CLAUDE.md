@@ -177,7 +177,9 @@ script. Comparing names alone was not enough — it passed a key that only one
 platform set. CI
 runs it on every push and weekly, since Brave retires names over time. Run it
 before touching either key list — it catches exactly the class of bug that got
-through three reviews.
+through three reviews. It also refuses to skip a line it cannot parse: a
+regex that silently ignores a malformed entry reproduces the very problem
+it was written to catch.
 
 Behaviour is still only verified by running the scripts.
 

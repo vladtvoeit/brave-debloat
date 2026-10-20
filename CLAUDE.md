@@ -230,10 +230,11 @@ it was written to catch.
 Behaviour is still only verified by running the scripts.
 
 PowerShell cannot be run on macOS, so Windows changes are written blind and
-must be exercised on a real machine. A related trap: the script's messages use
-typographic dashes, so a search-and-replace that assumes a plain hyphen matches
-nothing and fails silently. Two fixes were lost that way and only found by the
-next review — confirm every edit actually landed.
+must be exercised on a real machine. Confirm every edit actually landed: two
+fixes were lost to a search-and-replace that matched nothing, and neither was
+noticed until the next review. (That particular trap came from typographic
+dashes in the file; it is now kept strictly ASCII, enforced by
+`verify-keys.py`, for the separate encoding reason above.)
 
 - **macOS** — run in a sandbox with `open`, `osascript`, `pkill`,
   `system_profiler` and `defaults` stubbed on `PATH`, with `HOME` and `TMPDIR` redirected. That

@@ -97,6 +97,20 @@ def fetch(path):
         raise
 
 
+CPP_COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
+
+
+def strip_cpp_comments(body):
+    """Drop C++ comments before harvesting pref names.
+
+    brave-core does not delete a retired pref from pref_names.h, it marks it
+    with a // DEPRECATED comment or comments the line out entirely. Harvesting
+    the raw text would keep accepting such a name as current, which is the one
+    thing the weekly CI run exists to notice.
+    """
+    return CPP_COMMENT.sub("", body)
+
+
 def between(text, opener, closer):
     """Slice a block out by its delimiters, insisting both are unambiguous.
 
@@ -188,12 +202,23 @@ def main():
     failures = []
 
     known = set()
+    deprecated = set()
     for header in HEADERS:
         body = fetch(header)
         if body is None:
             print(f"FAIL  header moved or renamed: {header}")
             return 1
-        known.update(PREF.findall(body))
+        known.update(PREF.findall(strip_cpp_comments(body)))
+
+        # brave-core retires a pref by marking it rather than deleting it, so
+        # the name stays harvestable and nothing here would notice. Flag the
+        # ones annotated on their own line or the one above.
+        previous = ""
+        for line in body.splitlines():
+            if "deprecat" in (line + previous).lower():
+                deprecated.update(PREF.findall(line))
+            if line.strip():
+                previous = line
     print(f"  {len(known)} pref names read from {len(HEADERS)} brave-core files")
 
     # Neither bash -n nor shellcheck looks inside a quoted heredoc, so a
@@ -215,15 +240,16 @@ def main():
     # page, so a non-ASCII character in a string the script prints comes out
     # as mojibake. Comments are safe -- nobody sees them -- but anything else
     # is not. The file is deliberately kept BOM-less, so this is the guard.
+    # The whole file, comments included: exempting them meant a line of code
+    # with an inline comment was judged by its comment, and keeping the file
+    # uniformly ASCII is simpler than deciding what counts as printable.
     for number, line in enumerate(win.splitlines(), 1):
-        if line.strip().startswith("#"):
-            continue
         for char in line:
             if ord(char) > 127:
                 failures.append(
                     f"windows/brave-debloat.ps1 line {number}: non-ASCII "
-                    f"{char!r} outside a comment — PowerShell 5.1 would "
-                    f"render it as mojibake"
+                    f"{char!r} — PowerShell 5.1 reads this BOM-less file as "
+                    f"the system code page and would render it as mojibake"
                 )
                 break
 
@@ -260,14 +286,23 @@ def main():
     for name in sorted(mac_prefs | win_prefs):
         if name not in known:
             failures.append(f"pref does not exist in brave-core: {name}")
+        elif name in deprecated:
+            failures.append(
+                f"pref {name} is marked deprecated in brave-core — keep it "
+                f"deliberately and say so, or drop it"
+            )
 
     # Values matter as much as names: half these policies are *Disabled, where
     # off is 1, and half are *Enabled, where off is 0. A single transposed
     # digit silently turns a feature back on.
     # Parsed strictly, like the pref blocks: a malformed entry is reported
     # rather than skipped over.
-    mac_policy_block = between(mac, "POLICIES=(", "\n)")
-    win_policy_block = between(win, "$Policies = [ordered]@{", "\n}")
+    try:
+        mac_policy_block = between(mac, "POLICIES=(", "\n)")
+        win_policy_block = between(win, "$Policies = [ordered]@{", "\n}")
+    except ValueError as exc:
+        print(f"\nFAIL  block delimiters: {exc}")
+        return 1
     mac_entries = strict(mac_policy_block, MAC_POLICY, "macOS POLICIES", failures)
     win_entries = strict(win_policy_block, WIN_POLICY, "Windows Policies", failures)
 
@@ -278,6 +313,7 @@ def main():
     mac_policy_typed = {}
     mac_policy_values = {}
     mac_policy_kinds = {}
+    broken_policies = set()
     for name, kind, value in mac_entries:
         if kind == "bool" and value in ("true", "false"):
             typed = value == "true"
@@ -285,13 +321,16 @@ def main():
             typed = int(value)
         else:
             failures.append(f"policy {name} is declared {kind} but set to {value}")
+            # Left out of the dictionaries below, so skip it there too rather
+            # than reporting the same entry three more times as missing.
+            broken_policies.add(name)
             continue
         mac_policy_kinds[name] = kind
         mac_policy_typed[name] = typed
         mac_policy_values[name] = int(typed)
     win_policy_values = {name: int(value) for name, value in win_entries}
 
-    for name in sorted(set(mac_policy_values) | set(win_policy_values)):
+    for name in sorted((set(mac_policy_values) | set(win_policy_values)) - broken_policies):
         if name not in win_policy_values:
             failures.append(f"policy {name} is set on macOS but not on Windows")
         elif name not in mac_policy_values:
@@ -352,7 +391,7 @@ def main():
 
     expected = mac_policy_typed
 
-    for name in sorted(set(bundled) | set(expected)):
+    for name in sorted((set(bundled) | set(expected)) - broken_policies):
         if name not in bundled:
             failures.append(f"bundled profile is missing policy: {name}")
         elif name not in expected:

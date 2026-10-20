@@ -563,7 +563,7 @@ case "$PROFILE_STATE" in
 esac
 echo
 if [ -n "$SELF" ]; then
-  echo "  Revert:  $SELF_NAME --uninstall"
+  echo "  Revert:  ./$SELF_NAME --uninstall"
 else
   echo "  Revert:  curl -fsSL $REPO/macos/brave-debloat.sh | bash -s -- --uninstall"
 fi

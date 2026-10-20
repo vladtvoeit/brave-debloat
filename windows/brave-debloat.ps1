@@ -36,7 +36,13 @@
     .\brave-debloat.ps1 -UserOnly
 #>
 
-[CmdletBinding()]
+# PositionalBinding is off deliberately. With it on, $DataDirOverride picks up
+# position 0, and PowerShell does not recognise a token starting with -- or /
+# as a parameter name. Someone typing --uninstall out of habit from the macOS
+# script would have it bound there as a path, leaving $Uninstall false: the
+# script would then install everything and report that no Brave profile was
+# found in a directory called "--uninstall".
+[CmdletBinding(PositionalBinding = $false)]
 param(
     [switch]$Sponsored,
     [switch]$UserOnly,
@@ -46,6 +52,7 @@ param(
     # user is a standard account and types a separate admin's credentials, the
     # elevated process gets that admin's LOCALAPPDATA, and without this it
     # would patch the wrong profile.
+    [Parameter(DontShow)]
     [string]$DataDirOverride
 )
 
@@ -129,7 +136,7 @@ function Test-Admin {
 }
 
 # Re-launch elevated when writing machine-wide policies. Piped invocations
-# (irm … | iex) have no $PSCommandPath to relaunch, so those are told what
+# (irm ... | iex) have no $PSCommandPath to relaunch, so those are told what
 # to do instead.
 function Request-Elevation {
     param([string[]]$Arguments)
@@ -217,7 +224,7 @@ function Update-PrefsFile {
 
         # Depth must be generous: Brave's Preferences nest well past the default
         # of 2, and anything deeper would be silently flattened to a string.
-        # No BOM either — Chromium refuses to parse a file that starts with one.
+        # No BOM either - Chromium refuses to parse a file that starts with one.
         # Write-then-replace: writing over $Path directly would leave it
         # truncated if serialisation failed partway.
         $out = $doc | ConvertTo-Json -Depth 100 -Compress
@@ -365,7 +372,7 @@ if (-not $UserOnly -and -not (Test-Admin)) {
 }
 
 # -----------------------------------------------------------------------------
-#  Quit Brave — it rewrites its preference files on exit
+#  Quit Brave - it rewrites its preference files on exit
 # -----------------------------------------------------------------------------
 # Only this session's Brave: Get-Process spans every logged-in user, so with
 # Fast User Switching or RDP the script would kill someone else's browser, or
@@ -399,8 +406,12 @@ if ($brave) {
         # again for the rest of the ten seconds achieves nothing.
         if (-not $windowed) { break }
         foreach ($proc in $windowed) {
-            try { $proc.CloseMainWindow() | Out-Null } catch { }
-            $closedAny = $true
+            # CloseMainWindow returns false when the window will not take
+            # WM_CLOSE - covered by a modal dialog, say - and throws if the
+            # process has since exited. Either way nothing was closed.
+            try {
+                if ($proc.CloseMainWindow()) { $closedAny = $true }
+            } catch { }
         }
         Start-Sleep -Milliseconds 300
     }
@@ -412,7 +423,7 @@ if ($brave) {
     #
     # Its own deadline, not the one above: if the last window closed near the
     # ten-second mark there would be no time left to flush, and the kill would
-    # land mid-write — the very thing this wait exists to avoid.
+    # land mid-write - the very thing this wait exists to avoid.
     # $windowed is from the start of the last iteration, so ask again: a
     # window that refused to close (an unsaved-changes prompt, say) means the
     # loop timed out rather than finished, and waiting further is pointless.
@@ -470,7 +481,7 @@ if ($UserOnly) { Write-Warn 'user-level policies; machine-wide ones override the
 Write-Host ''
 
 # -----------------------------------------------------------------------------
-#  2. Profile preferences — toolbar buttons and other non-policy toggles
+#  2. Profile preferences - toolbar buttons and other non-policy toggles
 # -----------------------------------------------------------------------------
 if ($BraveAlive) {
     # Already warned above: Brave is still running and would overwrite this.

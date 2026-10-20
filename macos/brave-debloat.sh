@@ -438,7 +438,9 @@ PY
     [ -d "$pdir/ads_service" ] || continue
     rm -rf "$pdir/ads_service" 2>/dev/null && cleared=$((cleared + 1))
   done
-  [ "$cleared" -gt 0 ] && ok "ad cache cleared ($cleared)" || true
+  if [ "$cleared" -gt 0 ]; then
+    ok "ad cache cleared ($cleared)"
+  fi
 fi
 
 # -----------------------------------------------------------------------------

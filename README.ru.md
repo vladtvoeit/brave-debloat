@@ -97,6 +97,11 @@ irm https://raw.githubusercontent.com/vladtvoeit/brave-debloat/main/windows/brav
 Settings. После установки macOS сама воссоздаёт файл политик при каждой
 загрузке — именно то поведение, которое нужно.
 
+Готовая копия профиля лежит в
+[`macos/brave-debloat.mobileconfig`](macos/brave-debloat.mobileconfig) — если
+проще поставить руками, чем запускать скрипт. Скрипт генерирует такой же,
+только со свежими UUID.
+
 **macOS не разрешает устанавливать профиль конфигурации из командной строки**,
 поэтому этот шаг ручной:
 

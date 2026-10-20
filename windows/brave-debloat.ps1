@@ -106,8 +106,11 @@ function Request-Elevation {
     }
 
     Write-Head 'Requesting administrator rights (UAC)'
-    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"") + $Arguments
-    Start-Process powershell -Verb RunAs -ArgumentList $argList
+    # -NoExit keeps the elevated window up, otherwise it closes the moment the
+    # script ends and the output is gone before it can be read.
+    $exe = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh' } else { 'powershell' }
+    $argList = @('-NoProfile', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"") + $Arguments
+    Start-Process $exe -Verb RunAs -ArgumentList $argList
     exit
 }
 
@@ -147,14 +150,19 @@ function Update-PrefsFile {
         # Depth must be generous: Brave's Preferences nest well past the default
         # of 2, and anything deeper would be silently flattened to a string.
         # No BOM either — Chromium refuses to parse a file that starts with one.
+        # Write-then-replace: writing over $Path directly would leave it
+        # truncated if serialisation failed partway.
         $out = $doc | ConvertTo-Json -Depth 100 -Compress
-        [IO.File]::WriteAllText($Path, $out, (New-Object Text.UTF8Encoding $false))
+        $tmp = "$Path.tmp-$Stamp"
+        [IO.File]::WriteAllText($tmp, $out, (New-Object Text.UTF8Encoding $false))
+        [IO.File]::Replace($tmp, $Path, $null)
     } catch {
         Write-Warn "skipped $(Split-Path $Path -Leaf): $($_.Exception.Message)"
         return
     }
 
-    Write-Ok (Split-Path $Path -Leaf)
+    $rel = if ($Path.StartsWith($DataDir)) { $Path.Substring($DataDir.Length).TrimStart('\') } else { $Path }
+    Write-Ok $rel
 }
 
 # -----------------------------------------------------------------------------
@@ -164,15 +172,34 @@ if ($Uninstall) {
     if (-not $UserOnly -and -not (Test-Admin)) { Request-Elevation -Arguments @('-Uninstall') }
 
     Write-Head 'Removing policies'
-    $found = $false
-    foreach ($key in @($PolicyKey, 'HKCU:\SOFTWARE\Policies\BraveSoftware\Brave')) {
-        if (Test-Path $key) {
-            Remove-Item -Path $key -Recurse -Force
-            Write-Ok $key
-            $found = $true
+    $targets = @($PolicyKey)
+    if (-not $UserOnly) { $targets += 'HKCU:\SOFTWARE\Policies\BraveSoftware\Brave' }
+
+    $removed = 0
+    foreach ($key in $targets) {
+        if (-not (Test-Path $key)) { continue }
+
+        foreach ($name in $Policies.Keys) {
+            if ($null -ne (Get-ItemProperty -Path $key -Name $name -ErrorAction SilentlyContinue)) {
+                Remove-ItemProperty -Path $key -Name $name -Force
+                $removed++
+            }
+        }
+
+        # The key may hold policies this script never set - an admin's own
+        # DnsOverHttpsMode, ExtensionInstallForcelist and so on. Drop the key
+        # itself only once nothing is left in it.
+        $left = @((Get-Item $key).Property)
+        $subs = @(Get-ChildItem $key -ErrorAction SilentlyContinue)
+        if ($left.Count -eq 0 -and $subs.Count -eq 0) {
+            Remove-Item -Path $key -Force
+            Write-Ok "$key (emptied and removed)"
+        } else {
+            Write-Ok "$key ($($left.Count) unrelated values left untouched)"
         }
     }
-    if (-not $found) { Write-Warn 'no policy key found' }
+    if ($removed -eq 0) { Write-Warn 'none of this script''s policies were present' }
+    else { Write-Ok "$removed values removed" }
     Write-Host ''
     Write-Host 'Profile preferences are not reverted automatically.'
     Write-Host "Restore a *.bak-* file next to Preferences / Local State if needed."
@@ -180,18 +207,33 @@ if ($Uninstall) {
 }
 
 # Elevate before touching anything, so Brave is not closed twice.
-if (-not $UserOnly -and -not (Test-Admin)) { Request-Elevation -Arguments @() }
+if (-not $UserOnly -and -not (Test-Admin)) {
+    $fwd = @()
+    if ($Sponsored) { $fwd += '-Sponsored' }
+    Request-Elevation -Arguments $fwd
+}
 
 # -----------------------------------------------------------------------------
 #  Quit Brave — it rewrites its preference files on exit
 # -----------------------------------------------------------------------------
-Write-Head 'Quitting Brave'
-Get-Process -Name 'brave' -ErrorAction SilentlyContinue | ForEach-Object {
-    $_.CloseMainWindow() | Out-Null
+$brave = Get-Process -Name 'brave' -ErrorAction SilentlyContinue
+if ($brave) {
+    Write-Head 'Quitting Brave'
+    $brave | ForEach-Object { $_.CloseMainWindow() | Out-Null }
+
+    # Brave flushes Preferences on exit; killing it mid-write is how profiles
+    # get corrupted. Give it up to 10s, force only if it hangs.
+    $deadline = (Get-Date).AddSeconds(10)
+    while ((Get-Process -Name 'brave' -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 200
+    }
+    $still = Get-Process -Name 'brave' -ErrorAction SilentlyContinue
+    if ($still) {
+        Write-Warn 'still running after 10s - forcing'
+        $still | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+    }
 }
-Start-Sleep -Seconds 2
-Get-Process -Name 'brave' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Start-Sleep -Seconds 1
 
 # -----------------------------------------------------------------------------
 #  1. Registry policies
@@ -255,8 +297,14 @@ if (-not (Test-Path -LiteralPath $DataDir)) {
 
     Update-PrefsFile -Path (Join-Path $DataDir 'Local State') -Prefs $localState
 
-    foreach ($junk in @('Default\ads_service', 'sponsored-images', 'Default\sponsored-images')) {
-        $path = Join-Path $DataDir $junk
+    $junk = @(Join-Path $DataDir 'sponsored-images')
+    Get-ChildItem -LiteralPath $DataDir -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -eq 'Default' -or $_.Name -like 'Profile *' } |
+        ForEach-Object {
+            $junk += (Join-Path $_.FullName 'ads_service')
+            $junk += (Join-Path $_.FullName 'sponsored-images')
+        }
+    foreach ($path in $junk) {
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
     }
     Write-Ok 'ad cache cleared'

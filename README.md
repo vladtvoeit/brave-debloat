@@ -96,6 +96,11 @@ So the script generates a proper `.mobileconfig` and hands it to System
 Settings instead. Once installed, macOS regenerates the policy file from it on
 every boot, which is exactly the behaviour you want.
 
+A ready-made copy of the profile lives at
+[`macos/brave-debloat.mobileconfig`](macos/brave-debloat.mobileconfig) if you
+would rather install it by hand than run the script — the script generates an
+identical one, only with fresh UUIDs.
+
 **macOS does not allow installing a configuration profile from the command
 line**, so this one step is manual:
 

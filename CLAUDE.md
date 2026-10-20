@@ -215,6 +215,20 @@ the same dead ends are not explored twice.
 
 ## Testing
 
+**`tools/check.sh` runs everything that can run on the current machine** — bash
+syntax, shellcheck, PowerShell parsing, the bundled profile, `verify-keys.py`,
+and a smoke run of the macOS script with every system-touching command stubbed.
+It is the one command to run before pushing, and the one the reviewer is told
+to run. A check whose tool is missing prints `SKIP` and says which; that is not
+a pass, and anything skipped is what CI covers (shellcheck and PowerShell
+parsing need `shellcheck` and `pwsh` installed locally). It needs network,
+because `verify-keys.py` reads brave-core.
+
+The smoke run exists because the manual version of it — stubs on `PATH`,
+`HOME` and `TMPDIR` redirected — was being rebuilt by hand every round. It also
+compares the profile the script generates against the one committed, which
+`verify-keys.py` only does textually.
+
 `tools/verify-keys.py` checks every preference and policy name against
 brave-core, that the two scripts agree on names *and values* and on which file
 each pref goes to, that no pref appears in two groups at once, and that the

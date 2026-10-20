@@ -156,9 +156,9 @@ function Update-PrefsFile {
         $tmp = "$Path.tmp-$Stamp"
         [IO.File]::WriteAllText($tmp, $out, (New-Object Text.UTF8Encoding $false))
 
-        # Move-Item -Force, not [IO.File]::Replace: the latter rejects a null
-        # backup path on .NET Framework with "the path is not of a legal form".
-        # On one volume this is a single rename, which is what we need.
+        # Move-Item -Force, not [IO.File]::Replace: passing $null as the
+        # backup path throws "the path is not of a legal form" from
+        # PowerShell. On one volume this is a single rename either way.
         Move-Item -LiteralPath $tmp -Destination $Path -Force
     } catch {
         if ($tmp -and (Test-Path -LiteralPath $tmp)) {

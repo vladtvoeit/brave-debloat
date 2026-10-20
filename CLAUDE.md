@@ -147,6 +147,15 @@ the same dead ends are not explored twice.
   and `--help` would `sed` a binary. It does not: `$0` is the bare word `sh`,
   `zsh` or `bash` in every piped form, including `sh < file`, and the guard
   short-circuits. Verified three times; do not "fix" it again.
+- **`exit` inside `irm … | iex` closes the user's console.** `Invoke-Expression`
+  runs the code in the caller's own scope, so `exit` behaves exactly as if it
+  had been typed at the prompt. The refusal paths that are reachable only when
+  piped therefore end with `throw`, which stops the run without taking the
+  window with it — `exit` is used only when `$PSCommandPath` says a file is
+  running. The four lines of `CategoryInfo` noise `throw` leaves behind are a
+  deliberate trade: routing a flag back to the top level to allow a clean
+  `return` would mean touching a path that can only be tested by hand, and
+  the two previous cosmetic passes over this code each produced a regression.
 - **A PowerShell parameter set is resolved at invocation, not at parse
   time.** `Split-Path -LiteralPath $p -Leaf` parses cleanly and fails at run
   time with "parameter set cannot be resolved", because 5.1 keeps

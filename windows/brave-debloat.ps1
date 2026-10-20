@@ -413,7 +413,18 @@ if ($brave) {
     # Its own deadline, not the one above: if the last window closed near the
     # ten-second mark there would be no time left to flush, and the kill would
     # land mid-write — the very thing this wait exists to avoid.
-    if ($closedAny) {
+    # $windowed is from the start of the last iteration, so ask again: a
+    # window that refused to close (an unsaved-changes prompt, say) means the
+    # loop timed out rather than finished, and waiting further is pointless.
+    $stillWindowed = @(
+        Get-Process -Name 'brave' -ErrorAction SilentlyContinue |
+            Where-Object { $_.SessionId -eq $sessionId } |
+            Where-Object {
+                try { $_.Refresh(); $_.MainWindowHandle -ne 0 } catch { $false }
+            }
+    )
+
+    if ($closedAny -and -not $stillWindowed) {
         $flushBy = (Get-Date).AddSeconds(5)
         while ((Get-Date) -lt $flushBy) {
             if (-not @(Get-Process -Name 'brave' -ErrorAction SilentlyContinue |
@@ -425,7 +436,9 @@ if ($brave) {
     $still = @(Get-Process -Name 'brave' -ErrorAction SilentlyContinue |
                Where-Object { $_.SessionId -eq $sessionId })
     if ($still) {
-        if ($closedAny) {
+        if ($stillWindowed) {
+            Write-Warn 'a window would not close after 10s - forcing'
+        } elseif ($closedAny) {
             Write-Warn 'still running after the windows closed - forcing'
         } else {
             # Nothing had a window: background mode (tray), where nothing short
@@ -462,7 +475,7 @@ Write-Host ''
 if ($BraveAlive) {
     # Already warned above: Brave is still running and would overwrite this.
 } elseif (-not (Test-Path -LiteralPath $DataDir)) {
-    Write-Warn 'Brave profile not found — skipping profile preferences'
+    Write-Warn 'Brave profile not found - skipping profile preferences'
 } else {
     Write-Head 'Patching profile preferences (backups alongside each file)'
 

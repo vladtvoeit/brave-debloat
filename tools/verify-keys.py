@@ -43,19 +43,23 @@ HEADERS = [
 UPSTREAM_PREFS = {
     "browser.check_default_browser",
 }
+# Upstream Chromium, so absent from brave-core and unable to be checked
+# against a YAML there. The expected type is recorded here instead, because
+# nothing else would catch one being written as the wrong kind: the
+# cross-platform comparison comes down to int(), where False and 0 are equal.
 UPSTREAM_POLICIES = {
-    "BackgroundModeEnabled",
-    "DefaultBrowserSettingEnabled",
-    "FeedbackSurveysEnabled",
-    "MetricsReportingEnabled",
-    "NetworkPredictionOptions",
-    "PrivacySandboxAdMeasurementEnabled",
-    "PrivacySandboxPromptEnabled",
-    "PrivacySandboxSiteEnabledAdsEnabled",
-    "PromotionalTabsEnabled",
-    "SafeBrowsingExtendedReportingEnabled",
-    "SpellCheckServiceEnabled",
-    "UrlKeyedAnonymizedDataCollectionEnabled",
+    "BackgroundModeEnabled": "bool",
+    "DefaultBrowserSettingEnabled": "bool",
+    "FeedbackSurveysEnabled": "bool",
+    "MetricsReportingEnabled": "bool",
+    "NetworkPredictionOptions": "integer",
+    "PrivacySandboxAdMeasurementEnabled": "bool",
+    "PrivacySandboxPromptEnabled": "bool",
+    "PrivacySandboxSiteEnabledAdsEnabled": "bool",
+    "PromotionalTabsEnabled": "bool",
+    "SafeBrowsingExtendedReportingEnabled": "bool",
+    "SpellCheckServiceEnabled": "bool",
+    "UrlKeyedAnonymizedDataCollectionEnabled": "bool",
 }
 
 PREF = re.compile(r"""["']([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)["']""")
@@ -94,7 +98,18 @@ def fetch(path):
 
 
 def between(text, opener, closer):
+    """Slice a block out by its delimiters, insisting both are unambiguous.
+
+    The uniqueness check is the point: the Windows sponsored block is opened by
+    `if ($Sponsored) {`, which also appears earlier as a one-line form. That it
+    does not match today rests on a newline, and reformatting that other line
+    would silently redirect this to the wrong block.
+    """
+    if text.count(opener) != 1:
+        raise ValueError(f"{opener!r} appears {text.count(opener)} times, expected once")
     start = text.index(opener) + len(opener)
+    if text.count(closer, start) < 1:
+        raise ValueError(f"{closer!r} not found after {opener!r}")
     return text[start:text.index(closer, start)]
 
 
@@ -142,7 +157,7 @@ def grouped_prefs(mac, win, failures):
 
     mac_groups = {
         "profile": group(mac, "PROFILE = {", "\n}", PY_ENTRY, "macOS PROFILE"),
-        "sponsored": group(mac, "PROFILE.update({", "})", PY_ENTRY, "macOS sponsored"),
+        "sponsored": group(mac, "PROFILE.update({\n", "\n    })", PY_ENTRY, "macOS sponsored"),
         "local_state": group(mac, "LOCAL_STATE = {", "\n}", PY_ENTRY, "macOS LOCAL_STATE"),
     }
     win_groups = {
@@ -196,7 +211,29 @@ def main():
             failures.append(f"embedded Python block {index}: {exc}")
     print(f"  {len(blocks)} embedded Python blocks parsed")
 
-    mac_groups, win_groups = grouped_prefs(mac, win, failures)
+    # Windows PowerShell 5.1 reads a BOM-less .ps1 as the system ANSI code
+    # page, so a non-ASCII character in a string the script prints comes out
+    # as mojibake. Comments are safe -- nobody sees them -- but anything else
+    # is not. The file is deliberately kept BOM-less, so this is the guard.
+    for number, line in enumerate(win.splitlines(), 1):
+        if line.strip().startswith("#"):
+            continue
+        for char in line:
+            if ord(char) > 127:
+                failures.append(
+                    f"windows/brave-debloat.ps1 line {number}: non-ASCII "
+                    f"{char!r} outside a comment — PowerShell 5.1 would "
+                    f"render it as mojibake"
+                )
+                break
+
+    try:
+        mac_groups, win_groups = grouped_prefs(mac, win, failures)
+    except ValueError as exc:
+        # A block delimiter stopped being unique or went missing. Report it
+        # like any other finding rather than as a traceback.
+        print(f"\nFAIL  block delimiters: {exc}")
+        return 1
 
     for group in ("profile", "sponsored", "local_state"):
         left, right = mac_groups[group], win_groups[group]
@@ -227,17 +264,13 @@ def main():
     # Values matter as much as names: half these policies are *Disabled, where
     # off is 1, and half are *Enabled, where off is 0. A single transposed
     # digit silently turns a feature back on.
-    # Parsed strictly, like the pref blocks: findall over the whole file would
-    # skip a malformed entry instead of reporting it, and MAC_POLICY treats any
-    # value that is not "true" as false, so a typo in the literal would pass.
+    # Parsed strictly, like the pref blocks: a malformed entry is reported
+    # rather than skipped over.
     mac_policy_block = between(mac, "POLICIES=(", "\n)")
     win_policy_block = between(win, "$Policies = [ordered]@{", "\n}")
     mac_entries = strict(mac_policy_block, MAC_POLICY, "macOS POLICIES", failures)
     win_entries = strict(win_policy_block, WIN_POLICY, "Windows Policies", failures)
 
-    # The regex accepts any of true/false/digits after either type, so the
-    # pairing is checked here: "Foo|bool|1" would otherwise read as false, and
-    # "Foo|integer|true" would crash int().
     # Typed once, here. The regex accepts any of true/false/digits after
     # either type, so an entry is validated before use: "Foo|bool|1" would
     # otherwise read as false, and "Foo|integer|true" would crash int() —
@@ -274,6 +307,13 @@ def main():
 
     for name in sorted(mac_policies | win_policies):
         if name in UPSTREAM_POLICIES:
+            want = UPSTREAM_POLICIES[name]
+            used = mac_policy_kinds.get(name)
+            if used and used != want:
+                failures.append(
+                    f"policy {name} is an upstream Chromium {want} but the "
+                    f"script writes it as {used}"
+                )
             continue
         path = f"components/policy/resources/templates/policy_definitions/BraveSoftware/{name}.yaml"
         definition = fetch(path)

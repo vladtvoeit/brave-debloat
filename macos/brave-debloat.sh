@@ -213,11 +213,13 @@ if [ "$WANT_UNINSTALL" = "1" ]; then
     ok "$removed keys removed"
   fi
   echo
-  bold "Configuration profile"
-  echo "   Remove it by hand: System Settings → General → Device Management"
-  echo "   → \"Brave Debloat\" → remove."
+  bold "==> Configuration profile"
   if profile_installed; then
+    echo "   Remove it by hand: System Settings → General → Device Management"
+    echo "   → \"Brave Debloat\" → remove."
     open "x-apple.systempreferences:com.apple.Profiles-Settings.extension" 2>/dev/null || true
+  else
+    warn "not installed"
   fi
   echo
   echo "   Profile preferences are not reverted automatically."

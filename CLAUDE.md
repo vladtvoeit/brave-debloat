@@ -147,6 +147,13 @@ the same dead ends are not explored twice.
   and `--help` would `sed` a binary. It does not: `$0` is the bare word `sh`,
   `zsh` or `bash` in every piped form, including `sh < file`, and the guard
   short-circuits. Verified three times; do not "fix" it again.
+- **Keep the PowerShell script's printable strings ASCII.** It is stored
+  without a BOM, and Windows PowerShell 5.1 then reads a `.ps1` as the system
+  ANSI code page rather than UTF-8, so a typographic dash in a message prints
+  as mojibake. Comments are harmless, since nobody sees them; `verify-keys.py`
+  enforces the rule for everything else. Adding a BOM would fix the display
+  but is its own trap — anything that concatenates or pipes the file then
+  carries the marker into the middle of the text.
 - **`exit` inside `irm … | iex` closes the user's console.** `Invoke-Expression`
   runs the code in the caller's own scope, so `exit` behaves exactly as if it
   had been typed at the prompt. The refusal paths that are reachable only when

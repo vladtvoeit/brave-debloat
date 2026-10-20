@@ -309,6 +309,7 @@ if ($Uninstall) {
     if (-not $UserOnly) { $targets += 'HKCU:\SOFTWARE\Policies\BraveSoftware\Brave' }
 
     $total = 0
+    $reported = $false
     foreach ($key in $targets) {
         if (-not (Test-Path $key)) { continue }
 
@@ -335,14 +336,20 @@ if ($Uninstall) {
             } else {
                 Write-Ok "$key - was already empty, removed"
             }
+            $reported = $true
         } elseif ($n -gt 0) {
             $kept = @()
             if ($left.Count) { $kept += "$($left.Count) values" }
             if ($subs.Count) { $kept += "$($subs.Count) subkeys" }
             Write-Ok "$key - $n removed, $($kept -join ' and ') left untouched"
+            $reported = $true
         }
     }
-    if ($total -eq 0) { Write-Warn 'none of this script''s policies were present' }
+    # Only when nothing at all was said above: following "was already empty,
+    # removed" with "none were present" reads as a contradiction.
+    if ($total -eq 0 -and -not $reported) {
+        Write-Warn 'none of this script''s policies were present'
+    }
     Write-Host ''
     Write-Host 'Profile preferences are not reverted automatically.'
     Write-Host "Restore *.bak-initial next to Preferences / Local State for the state"
@@ -400,11 +407,15 @@ if ($brave) {
 
     # A window closing frees its handle before Brave finishes flushing
     # Preferences, so wait for the processes to actually go. Only worth doing
-    # if a window was asked to close: a browser that was already sitting in
-    # the tray is not about to exit on its own, and waiting on it is three
-    # seconds spent for nothing.
+    # if a window was asked to close: a browser already sitting in the tray is
+    # not going to exit on its own, and waiting on it buys nothing.
+    #
+    # Its own deadline, not the one above: if the last window closed near the
+    # ten-second mark there would be no time left to flush, and the kill would
+    # land mid-write — the very thing this wait exists to avoid.
     if ($closedAny) {
-        while ((Get-Date) -lt $deadline) {
+        $flushBy = (Get-Date).AddSeconds(5)
+        while ((Get-Date) -lt $flushBy) {
             if (-not @(Get-Process -Name 'brave' -ErrorAction SilentlyContinue |
                        Where-Object { $_.SessionId -eq $sessionId })) { break }
             Start-Sleep -Milliseconds 200
@@ -520,4 +531,9 @@ Write-Host ''
 Write-Host '  Verify:  brave://policy    - every policy listed, status OK'
 Write-Host '           brave://settings  - Rewards / Wallet / VPN / Leo are gone'
 Write-Host ''
-Write-Host '  Revert:  .\brave-debloat.ps1 -Uninstall'
+if ($PSCommandPath) {
+    Write-Host '  Revert:  .\brave-debloat.ps1 -Uninstall'
+} else {
+    # Piped in: there is no file on disk to call.
+    Write-Host '  Revert:  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/vladtvoeit/brave-debloat/main/windows/brave-debloat.ps1))) -Uninstall'
+}

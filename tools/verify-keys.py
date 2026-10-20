@@ -62,8 +62,13 @@ PREF = re.compile(r"""["']([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)["']""")
 # Anchored to the end of the line, with an optional trailing comma or comment.
 # Without that, a prefix match accepts typos that are valid syntax but wrong at
 # run time: $falsehood reads as $false, Falsehood reads as False.
-TAIL = r"\s*,?\s*(?:\#.*)?$"
-PY_ENTRY = re.compile(r'"([a-z][a-z0-9_.]*)"\s*:\s*(True|False)' + TAIL)
+# A trailing comma belongs only in the Python dictionaries. Allowing it
+# everywhere let a stray one into the bash POLICIES array, where the value
+# becomes "true," — the profile generator then compares it against "true",
+# finds no match and writes <false/>, inverting the policy in silence.
+TAIL = r"\s*(?:\#.*)?$"
+PY_TAIL = r"\s*,?" + TAIL
+PY_ENTRY = re.compile(r'"([a-z][a-z0-9_.]*)"\s*:\s*(True|False)' + PY_TAIL)
 PS_ENTRY = re.compile(r"'([a-z][a-z0-9_.]*)'\s*=\s*\$(true|false)" + TAIL, re.I)
 PS_INDEXED = re.compile(
     r"\$profilePrefs\['([a-z][a-z0-9_.]*)'\]\s*=\s*\$(true|false)" + TAIL, re.I
@@ -107,7 +112,9 @@ def strict(block, pattern, where, failures):
     seen = set()
     for line in block.splitlines():
         line = line.strip()
-        if not line or line.startswith("#") or line in ("}", "})", "{"):
+        # No brace exemption: between() already trims the block delimiters,
+        # so a stray brace inside one is a mistake, not punctuation.
+        if not line or line.startswith("#"):
             continue
 
         match = pattern.match(line)
@@ -149,6 +156,9 @@ def grouped_prefs(mac, win, failures):
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 PY_BLOCK = re.compile(r"<<'PY'\n(.*?)\nPY\n", re.S)
+# profile_is_current and the preference patcher. A changed marker on one of
+# them would otherwise drop it from the syntax check unnoticed.
+EXPECTED_PY_BLOCKS = 2
 
 
 def read(path):
@@ -174,8 +184,11 @@ def main():
     # Neither bash -n nor shellcheck looks inside a quoted heredoc, so a
     # missing comma in PROFILE would surface only at run time.
     blocks = PY_BLOCK.findall(mac)
-    if not blocks:
-        failures.append("no embedded Python blocks found — has the heredoc marker changed?")
+    if len(blocks) != EXPECTED_PY_BLOCKS:
+        failures.append(
+            f"expected {EXPECTED_PY_BLOCKS} embedded Python blocks, found "
+            f"{len(blocks)} — has a heredoc marker changed?"
+        )
     for index, block in enumerate(blocks, 1):
         try:
             ast.parse(block)
@@ -273,7 +286,9 @@ def main():
         # integer one "int" or "int-enum"; "boolean" only appears indented
         # inside schema:, which is why matching it here never fired.
         declared = re.search(r"^type:\s*(\S+)", definition, re.M)
-        if declared and name in mac_policy_kinds:
+        if declared is None:
+            failures.append(f"policy {name} has no type: line in brave-core")
+        elif name in mac_policy_kinds:
             yaml_kind = {"main": "bool", "int": "integer", "int-enum": "integer"}.get(
                 declared.group(1)
             )

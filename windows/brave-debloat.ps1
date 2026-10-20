@@ -199,10 +199,6 @@ function Update-PrefsFile {
         if ($tmp -and (Test-Path -LiteralPath $tmp)) {
             Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
         }
-        # PowerShell 5.1's ConvertFrom-Json chokes on things Chromium writes:
-        # an empty-string dictionary key, keys differing only in case, and
-        # anything past the 2 MB JavaScriptSerializer limit. Say so loudly --
-        # "skipped" reads as harmless and this means the file was not patched.
         Write-Warn "NOT PATCHED - $(Get-RelativePath $Path): $($_.Exception.Message)"
         return
     }
@@ -218,7 +214,7 @@ if ($Uninstall) {
     # separate admin's password gets that admin's hive afterwards, and their
     # own user-level policies would survive untouched.
     $hkcu = 'HKCU:\SOFTWARE\Policies\BraveSoftware\Brave'
-    if (Test-Path $hkcu) {
+    if (-not $UserOnly -and -not (Test-Admin) -and (Test-Path $hkcu)) {
         $n = 0
         foreach ($name in $Policies.Keys) {
             if ($null -ne (Get-ItemProperty -Path $hkcu -Name $name -ErrorAction SilentlyContinue)) {
@@ -337,7 +333,9 @@ Write-Host ''
 # -----------------------------------------------------------------------------
 #  2. Profile preferences — toolbar buttons and other non-policy toggles
 # -----------------------------------------------------------------------------
-if (-not (Test-Path -LiteralPath $DataDir)) {
+if ($BraveAlive) {
+    # Already warned above: Brave is still running and would overwrite this.
+} elseif (-not (Test-Path -LiteralPath $DataDir)) {
     Write-Warn 'Brave profile not found — skipping profile preferences'
 } else {
     Write-Head "Patching profile preferences (backups: *.bak-$Stamp)"
@@ -394,7 +392,8 @@ if (-not (Test-Path -LiteralPath $DataDir)) {
             $ads = Join-Path $_.FullName 'ads_service'
             if (Test-Path -LiteralPath $ads) {
                 Remove-Item -LiteralPath $ads -Recurse -Force -ErrorAction SilentlyContinue
-                $cleared++
+                # SilentlyContinue swallows a locked directory, so confirm.
+                if (-not (Test-Path -LiteralPath $ads)) { $cleared++ }
             }
         }
     if ($cleared) { Write-Ok "ad cache cleared ($cleared)" }

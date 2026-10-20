@@ -17,6 +17,9 @@ jobs:
       - name: Shell syntax
         run: bash -n macos/brave-debloat.sh
 
+      - name: Shellcheck
+        run: shellcheck macos/brave-debloat.sh
+
       - name: PowerShell syntax
         shell: pwsh
         run: |

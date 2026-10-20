@@ -175,7 +175,12 @@ runs it on every push and weekly, since Brave retires names over time. Run it
 before touching either key list — it catches exactly the class of bug that got
 through three reviews.
 
-Behaviour is still only verified by running the scripts. PowerShell cannot be run on the macOS side, so Windows changes are
+Behaviour is still only verified by running the scripts.
+
+One recurring trap when editing: the PowerShell script cannot be syntax-checked
+on macOS, and its messages use typographic dashes, so a search-and-replace that
+assumes a plain hyphen silently matches nothing. Two fixes were lost that way
+and only found by the next review. Confirm every edit actually landed. PowerShell cannot be run on the macOS side, so Windows changes are
 written blind and must be exercised on a real machine.
 
 - **macOS** — run in a sandbox with `open`, `osascript`, `pkill`,

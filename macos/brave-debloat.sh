@@ -92,10 +92,17 @@ try:
     live = json.load(sys.stdin)
 except Exception:
     sys.exit(1)
+expected = {}
 for entry in sys.argv[1:]:
     key, kind, raw = entry.split("|")
-    want = raw == "true" if kind == "bool" else int(raw)
-    got = live.get(key)
+    expected[key] = raw == "true" if kind == "bool" else int(raw)
+
+# An exact match, not a subset: a policy dropped from POLICIES would otherwise
+# stay active in an already-installed profile forever.
+if set(live) != set(expected):
+    sys.exit(1)
+for key, want in expected.items():
+    got = live[key]
     if type(got) is not type(want) or got != want:
         sys.exit(1)
 sys.exit(0)
@@ -165,6 +172,7 @@ if [ "$WANT_UNINSTALL" = "1" ]; then
   bold "Configuration profile"
   echo "   Remove it by hand: System Settings → General → Device Management"
   echo "   → \"Brave Debloat\" → remove."
+  open "x-apple.systempreferences:com.apple.Profiles-Settings.extension" 2>/dev/null || true
   echo
   echo "   Profile preferences are not reverted automatically."
   echo "   Restore a *.bak-* file next to Preferences / Local State if needed."

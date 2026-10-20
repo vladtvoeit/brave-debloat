@@ -60,8 +60,8 @@ PREF = re.compile(r"""["']([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)["']""")
 PY_ENTRY = re.compile(r'"([a-z][a-z0-9_.]*)"\s*:\s*(True|False)')
 PS_ENTRY = re.compile(r"'([a-z][a-z0-9_.]*)'\s*=\s*\$(true|false)", re.I)
 PS_INDEXED = re.compile(r"\$profilePrefs\['([a-z][a-z0-9_.]*)'\]\s*=\s*\$(true|false)", re.I)
-MAC_POLICY = re.compile(r'"([A-Za-z][A-Za-z0-9]+)\|(?:bool|integer)\|')
-WIN_POLICY = re.compile(r"^\s{4}([A-Za-z][A-Za-z0-9]+)\s*=\s*\d", re.M)
+MAC_POLICY = re.compile(r'"([A-Za-z][A-Za-z0-9]+)\|(bool|integer)\|(\w+)"')
+WIN_POLICY = re.compile(r"^\s{4}([A-Za-z][A-Za-z0-9]+)\s*=\s*(\d+)", re.M)
 
 
 def fetch(path):
@@ -146,19 +146,47 @@ def main():
         if name not in known:
             failures.append(f"pref does not exist in brave-core: {name}")
 
-    mac_policies = {m.group(1) for m in MAC_POLICY.finditer(mac)}
-    win_policies = set(WIN_POLICY.findall(win))
-    if mac_policies != win_policies:
-        for name in sorted(mac_policies ^ win_policies):
-            where = "macOS only" if name in mac_policies else "Windows only"
-            failures.append(f"the two scripts disagree ({where}): policy {name}")
+    # Values matter as much as names: half these policies are *Disabled, where
+    # off is 1, and half are *Enabled, where off is 0. A single transposed
+    # digit silently turns a feature back on.
+    mac_policy_values = {
+        name: (1 if value == "true" else 0) if kind == "bool" else int(value)
+        for name, kind, value in MAC_POLICY.findall(mac)
+    }
+    win_policy_values = {name: int(value) for name, value in WIN_POLICY.findall(win)}
+
+    for name in sorted(set(mac_policy_values) | set(win_policy_values)):
+        if name not in win_policy_values:
+            failures.append(f"policy {name} is set on macOS but not on Windows")
+        elif name not in mac_policy_values:
+            failures.append(f"policy {name} is set on Windows but not on macOS")
+        elif mac_policy_values[name] != win_policy_values[name]:
+            failures.append(
+                f"policy {name} is {mac_policy_values[name]} on macOS, "
+                f"{win_policy_values[name]} on Windows"
+            )
+
+    mac_policies = set(mac_policy_values)
+    win_policies = set(win_policy_values)
 
     for name in sorted(mac_policies | win_policies):
         if name in UPSTREAM_POLICIES:
             continue
         path = f"components/policy/resources/templates/policy_definitions/BraveSoftware/{name}.yaml"
-        if fetch(path) is None:
+        definition = fetch(path)
+        if definition is None:
             failures.append(f"policy has no definition in brave-core: {name}")
+            continue
+
+        # The YAML is already fetched, so the declared type is free to check.
+        declared = re.search(r"^type:\s*(\S+)", definition, re.M)
+        if declared:
+            kind = declared.group(1)
+            used_as_int = mac_policy_values.get(name) not in (0, 1)
+            if kind in ("int", "integer") and not used_as_int:
+                failures.append(f"policy {name} is an {kind} in brave-core but set as a boolean")
+            elif kind in ("bool", "boolean") and used_as_int:
+                failures.append(f"policy {name} is a {kind} in brave-core but set as an integer")
 
     # The bundled .mobileconfig is offered as a hand-install route, so it must
     # not drift from what the script generates.

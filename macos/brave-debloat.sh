@@ -448,33 +448,61 @@ def deep_set(doc, dotted, value):
     cur[keys[-1]] = value
 
 
-def keep_backups(path):
-    """Keep the untouched original forever, plus the two most recent copies.
+def remove(path):
+    """Delete a file this script made, even if it carries the immutable flag.
+
+    shutil.copy2 copies a file's flags along with its contents, so a backup of
+    an immutable Preferences is itself immutable and a plain unlink of it
+    fails. People do set that flag on purpose, to stop Brave resetting their
+    settings; without this, every failed run would leave behind a copy that
+    can neither be pruned nor cleaned up."""
+    try:
+        os.unlink(path)
+    except PermissionError:
+        try:
+            os.chflags(path, 0)
+            os.unlink(path)
+        except (AttributeError, OSError):
+            pass
+    except OSError:
+        pass
+
+
+def make_backups(path):
+    """Keep the untouched original forever, and take this run's copy.
+
+    Returns the timestamped copy it made, or None on a first run, where the
+    initial copy is this same file and a second identical one would be noise.
 
     Preferences runs to megabytes and the README tells people to re-run after
-    Brave updates, so without this the profile directory fills up with copies
-    of already-patched state — and the one worth having, from before the first
-    run, is the one that scrolls away."""
+    Brave updates, so without rotation the profile directory fills up with
+    copies of already-patched state -- and the one worth having, from before
+    the first run, is the one that scrolls away. Rotation is prune_backups(),
+    kept apart so that it can wait until the replace has actually happened."""
     # glob.escape: a profile path may contain [ or ], which glob would
     # otherwise read as a character class and match nothing.
-    pattern = glob.escape(path) + ".bak-2*"
-    stamped = sorted(glob.glob(pattern))
+    stamped = sorted(glob.glob(glob.escape(path) + ".bak-2*"))
     initial = f"{path}.bak-initial"
 
     first_ever = not stamped and not os.path.exists(initial)
     if not os.path.exists(initial):
         shutil.copy2(stamped[0] if stamped else path, initial)
+    if first_ever:
+        return None
 
-    # On a first run the initial copy is this same file; a second identical
-    # one would be noise.
-    if not first_ever:
-        shutil.copy2(path, f"{path}.bak-{ts}")
+    made = f"{path}.bak-{ts}"
+    shutil.copy2(path, made)
+    return made
 
-    for stale in sorted(glob.glob(pattern))[:-2]:
-        try:
-            os.unlink(stale)
-        except OSError:
-            pass
+
+def prune_backups(path):
+    """Keep the two most recent timestamped copies; the initial one is never
+    touched. Only call this once the file has been replaced: pruning earlier
+    means a replace that fails still costs the oldest backup, and a few such
+    failures in a row would swap every intermediate copy for clones of the
+    same unchanged file."""
+    for stale in sorted(glob.glob(glob.escape(path) + ".bak-2*"))[:-2]:
+        remove(stale)
 
 
 def patch(path, prefs):
@@ -485,6 +513,8 @@ def patch(path, prefs):
         print(f"   ! skipped {os.path.relpath(path, data)}: {exc}")
         return
     tmp = f"{path}.tmp-{ts}"
+    made = None
+    replaced = False
     try:
         for key, value in prefs.items():
             deep_set(doc, key, value)
@@ -497,14 +527,15 @@ def patch(path, prefs):
         handle = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with open(handle, "w", encoding="utf-8") as fh:
             json.dump(doc, fh, ensure_ascii=False)
-        # Only now that the replacement exists on disk is it safe to touch the
-        # backups. Rotating first meant two failed runs in a row could discard
-        # both surviving copies while writing nothing.
-        keep_backups(path)
+        # The copy of the current file has to be taken before it is replaced,
+        # but nothing is deleted until after: see prune_backups().
+        made = make_backups(path)
         # Match the original exactly, in case Brave used something other
         # than 0600; os.replace carries the temp file's mode across.
         shutil.copymode(path, tmp)
         os.replace(tmp, path)
+        replaced = True
+        prune_backups(path)
     except Exception as exc:
         print(f"   ! NOT PATCHED {os.path.relpath(path, data)}: {exc}")
         return
@@ -517,6 +548,10 @@ def patch(path, prefs):
                 os.unlink(tmp)
             except OSError:
                 pass
+        # A copy taken for a replace that never happened duplicates the live
+        # file, so it is dropped rather than left to crowd out real history.
+        if made and not replaced and os.path.exists(made):
+            remove(made)
     print(f"   \033[32m✔\033[0m {os.path.relpath(path, data)}")
 
 

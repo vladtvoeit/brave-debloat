@@ -67,6 +67,17 @@ the same dead ends are not explored twice.
   place truncates the file before the new content exists, so a failure partway
   leaves nothing behind. Backups alone are not enough; the live file should
   never be in a broken state.
+- **Backups are taken before the replace and pruned only after it succeeds.**
+  Each run keeps `*.bak-initial` (the state before the first run, never
+  touched) plus the two most recent timestamped copies. The copy of the
+  current file must exist before it is overwritten, but deleting the oldest
+  one is a separate step that waits for the replace: pruned first, a replace
+  that fails (the file held open, immutable) still cost a backup, and a few
+  failures in a row would swap every intermediate copy for clones of one
+  unchanged file. A copy made for a replace that never happened is removed
+  again. This was caught by running the failure on Windows, not by review: an
+  earlier fix had moved the rotation after the temp-file write, which closed
+  the failure *before* the write but not the one *at* the replace.
 - **Shields, the ad blocker, auto-updates and sync are never touched.** The
   point is removing the storefront, not degrading the browser.
 
@@ -130,6 +141,13 @@ the same dead ends are not explored twice.
   exactly this reason, with 64 findings of the one code, after passing locally.
   The old version cannot be reproduced here, so a change to that kind of
   construct is confirmed by CI, not by the local run.
+- **`shutil.copy2` copies a file's flags along with its contents.** A backup
+  of an immutable `Preferences` (`chflags uchg`, which people set on purpose to
+  stop Brave resetting settings) is itself immutable, so a plain `os.unlink`
+  of it fails and was being swallowed: every failed run would have left a copy
+  that could be neither pruned nor cleaned up. `remove()` in the macOS script
+  clears the flag first. The Windows counterpart is the read-only attribute,
+  which `Remove-Item -Force` already overrides.
 - **Nothing in CI reads inside a quoted heredoc.** `bash -n` and `shellcheck`
   both skip the two embedded Python blocks, so a missing comma in `PROFILE`
   would pass every check and fail at run time. `tools/verify-keys.py` now runs
@@ -244,12 +262,15 @@ comments claimed the run exercised everything. A smoke run that never reaches
 the code says nothing about it. The seeded profile is checked by outcome on
 the files (values set, unrelated data kept, the original's mode kept, `0640`
 here on purpose so that only a real copy can pass, `.bak-initial` equal to the
-original, rotation after a second run, `ads_service` gone). A second profile is
-made to fail mid-patch with a dangling symlink where its backup must go, to
-prove two things that the success path cannot show: the temp file is removed in
-`finally`, and one profile's failure does not stop the others. That cleanup was
-once lost without anyone noticing; each of these checks was verified by
-breaking the script and watching the run fail.
+original, rotation after a second run, `ads_service` gone). Two further
+profiles are made to fail on purpose, to prove what the success path cannot
+show. One has a dangling symlink where its backup must go, so the patch dies
+after the temp file exists: the file is removed in `finally`, and one
+profile's failure does not stop the others. The other is made immutable with
+two old backups already beside it, so the final replace is refused: the backups
+must come out exactly as they went in. That cleanup was once lost without
+anyone noticing; each of these checks was verified by breaking the script and
+watching the run fail.
 
 `tools/verify-keys.py` checks every preference and policy name against
 brave-core, that the two scripts agree on names *and values* and on which file

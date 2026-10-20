@@ -104,6 +104,7 @@ smoke_macos() {
   local sb rc=0
   sb="$(mktemp -d)" || return 1
   smoke_macos_in "$sb" || rc=$?
+  chflags -R nouchg "$sb" 2>/dev/null # an immutable file would survive rm -rf
   rm -rf "$sb"
   return "$rc"
 }
@@ -111,7 +112,7 @@ smoke_macos() {
 # Called by smoke_macos, which is itself only reached through run().
 # shellcheck disable=SC2317,SC2329
 smoke_macos_in() {
-  local sb="$1" stage c out data rc unexpected
+  local sb="$1" stage planned c out data rc unexpected
   data="$sb/home/Library/Application Support/BraveSoftware/Brave-Browser"
   mkdir -p "$sb/bin" "$sb/tmp" "$data/Default/ads_service"
 
@@ -142,6 +143,19 @@ smoke_macos_in() {
   printf '{"x":1}' >"$data/Profile 1/Preferences"
   chmod 600 "$data/Profile 1/Preferences"
 
+  # A third profile whose final replace fails, with two old backups already
+  # there. The file is made immutable, which leaves it readable but refuses the
+  # rename over it. Backups are rotated to two, so a run that rotated before
+  # the replace would have created a third copy and deleted the oldest, for
+  # nothing: the live file is unchanged. A failed replace must leave the
+  # backups exactly as they were.
+  mkdir -p "$data/Profile 2"
+  printf '{"y":1}' >"$data/Profile 2/Preferences"
+  printf 'old-1' >"$data/Profile 2/Preferences.bak-20200101-000001"
+  printf 'old-2' >"$data/Profile 2/Preferences.bak-20200101-000002"
+  printf 'init' >"$data/Profile 2/Preferences.bak-initial"
+  chflags uchg "$data/Profile 2/Preferences"
+
   for stage in first second; do
     rc=0
     out="$(PATH="$sb/bin:$PATH" HOME="$sb/home" TMPDIR="$sb/tmp/" \
@@ -163,16 +177,18 @@ smoke_macos_in() {
         return 1
         ;;
     esac
-    # Exactly one profile is made to fail, on purpose; any other NOT PATCHED is
-    # a real problem, and the planned one must be reported rather than hidden.
-    case "$out" in
-      *"NOT PATCHED Profile 1/Preferences"*) ;;
-      *)
-        printf '%s run: the planned failure for Profile 1 was not reported:\n%s\n' "$stage" "$out"
-        return 1
-        ;;
-    esac
-    unexpected="$(printf '%s\n' "$out" | grep 'NOT PATCHED' | grep -v 'Profile 1/Preferences' || true)"
+    # Two profiles are made to fail, on purpose; any other NOT PATCHED is a real
+    # problem, and the planned ones must be reported rather than hidden.
+    for planned in "Profile 1" "Profile 2"; do
+      case "$out" in
+        *"NOT PATCHED $planned/Preferences"*) ;;
+        *)
+          printf '%s run: the planned failure for %s was not reported:\n%s\n' "$stage" "$planned" "$out"
+          return 1
+          ;;
+      esac
+    done
+    unexpected="$(printf '%s\n' "$out" | grep 'NOT PATCHED' | grep -v -e 'Profile 1/Preferences' -e 'Profile 2/Preferences' || true)"
     if [ -n "$unexpected" ]; then
       printf '%s run: unexpected failure:\n%s\n' "$stage" "$unexpected"
       return 1
@@ -240,6 +256,16 @@ need(not os.path.exists(os.path.join(data, "Default", "ads_service")), "ads_serv
 broken = os.path.join(data, "Profile 1", "Preferences")
 need(read(broken) == '{"x":1}', "Profile 1: modified although its patch failed")
 need(not glob.glob(broken + ".tmp-*"), "Profile 1: temp file left behind after a failed patch")
+
+# The profile whose final replace failed: untouched, no temp file, and above
+# all the backups exactly as they were.
+refused = os.path.join(data, "Profile 2", "Preferences")
+need(read(refused) == '{"y":1}', "Profile 2: modified although its replace failed")
+need(not glob.glob(refused + ".tmp-*"), "Profile 2: temp file left behind after a failed replace")
+kept = sorted(os.path.basename(f) for f in glob.glob(refused + ".bak-2*"))
+need(kept == ["Preferences.bak-20200101-000001", "Preferences.bak-20200101-000002"],
+     f"Profile 2: a failed replace changed the backups: {kept}")
+need(maybe(refused + ".bak-initial") == "init", "Profile 2: .bak-initial was changed")
 
 stamped = glob.glob(prefs_path + ".bak-2*")
 if stage == "first":

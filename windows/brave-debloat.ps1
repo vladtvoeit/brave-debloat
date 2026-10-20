@@ -208,7 +208,7 @@ function Update-PrefsFile {
         # into a dictionary rather than a PSCustomObject -- on 5.1 via
         # JavaScriptSerializer, which PowerShell 7 does not have and does not
         # need.
-        Write-Warn "NOT PATCHED - $(Get-RelativePath $Path): $($_.Exception.Message)"
+        Write-Warn "NOT PATCHED - $(Get-RelativePath $Path): $($_.Exception.Message.Trim())"
         return
     }
 
@@ -219,6 +219,9 @@ function Update-PrefsFile {
         return
     }
 
+    $tmp = "$Path.tmp-$Stamp"
+    $made = $null
+    $replaced = $false
     try {
         foreach ($key in $Prefs.Keys) { Set-DeepValue -Root $doc -Path $key -Value $Prefs[$key] }
 
@@ -228,15 +231,10 @@ function Update-PrefsFile {
         # Write-then-replace: writing over $Path directly would leave it
         # truncated if serialisation failed partway.
         $out = $doc | ConvertTo-Json -Depth 100 -Compress
-        $tmp = "$Path.tmp-$Stamp"
         [IO.File]::WriteAllText($tmp, $out, (New-Object Text.UTF8Encoding $false))
 
-        # Move-Item -Force, not [IO.File]::Replace: PowerShell binds $null
-        # to the backup-path parameter as an empty string, which Replace
-        # rejects. On one volume this is a single rename either way.
-        # Only now that the replacement exists on disk is it safe to touch the
-        # backups. Rotating first meant two failed runs in a row could discard
-        # both surviving copies while writing nothing.
+        # Backups. The copy of the current file has to be taken before it is
+        # replaced, but nothing is deleted until after: see the rotation below.
         #
         # -LiteralPath with -Filter, not a wildcard path: a profile directory
         # may contain [ or ], which PowerShell would read as a range.
@@ -258,8 +256,20 @@ function Update-PrefsFile {
         # one would be noise.
         if (-not $firstEver) {
             Copy-Item -LiteralPath $Path -Destination "$Path.bak-$Stamp" -Force
+            $made = "$Path.bak-$Stamp"
         }
 
+        # Move-Item -Force, not [IO.File]::Replace: PowerShell binds $null
+        # to the backup-path parameter as an empty string, which Replace
+        # rejects. On one volume this is a single rename either way.
+        Move-Item -LiteralPath $tmp -Destination $Path -Force
+        $replaced = $true
+
+        # Rotation, only now that the file has been replaced. Pruning earlier
+        # means a replace that fails (the file held open by something else,
+        # say) still costs the oldest backup, and a few such failures in a row
+        # would swap every intermediate copy for clones of one unchanged file.
+        # The initial copy is never touched.
         $stamped = @(Get-ChildItem -LiteralPath $dir -Filter "$leaf.bak-2*" -ErrorAction SilentlyContinue |
                      Sort-Object Name)
         if ($stamped.Count -gt 2) {
@@ -267,16 +277,28 @@ function Update-PrefsFile {
                 Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
             }
         }
-
-        Move-Item -LiteralPath $tmp -Destination $Path -Force
     } catch {
-        Write-Warn "NOT PATCHED - $(Get-RelativePath $Path): $($_.Exception.Message)"
+        # Trim: .NET exception messages often end in a line break, which showed
+        # up as a stray blank line under the warning.
+        $reason = $_.Exception.Message.Trim()
+        if ($_.Exception -is [System.IO.IOException]) {
+            # Windows reports a replace blocked by a lock as "the file already
+            # exists", which points nowhere useful.
+            $reason += ' (is it open in another program?)'
+        }
+        Write-Warn "NOT PATCHED - $(Get-RelativePath $Path): $reason"
         return
     } finally {
         # finally, not catch: Ctrl+C skips catch but still runs this. After a
         # successful move there is nothing left at this path.
         if ($tmp -and (Test-Path -LiteralPath $tmp)) {
             Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        }
+        # A copy taken for a replace that never happened duplicates the live
+        # file, so it is dropped rather than left to crowd out real history.
+        # -Force also clears a read-only attribute, which the copy inherits.
+        if ($made -and -not $replaced -and (Test-Path -LiteralPath $made)) {
+            Remove-Item -LiteralPath $made -Force -ErrorAction SilentlyContinue
         }
     }
 

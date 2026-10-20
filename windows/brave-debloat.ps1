@@ -15,11 +15,12 @@
     Shields and auto-updates are never touched.
 
 .PARAMETER Sponsored
-    Also disable sponsored wallpapers on the new tab page.
+    Also disable sponsored (ad) wallpapers on the new tab page. Brave's own
+    stock photos are never touched.
 
-.PARAMETER NoPolicies
-    Skip the registry policies, patch profile preferences only.
-    Does not require administrator rights.
+.PARAMETER UserOnly
+    Write policies to HKCU instead of HKLM. No administrator rights needed.
+    Brave honours both; machine-wide policies are the stronger of the two.
 
 .PARAMETER Uninstall
     Remove the policies this script set.
@@ -28,19 +29,20 @@
     .\brave-debloat.ps1
 
 .EXAMPLE
-    .\brave-debloat.ps1 -Sponsored
+    .\brave-debloat.ps1 -UserOnly
 #>
 
 [CmdletBinding()]
 param(
     [switch]$Sponsored,
-    [switch]$NoPolicies,
+    [switch]$UserOnly,
     [switch]$Uninstall
 )
 
 $ErrorActionPreference = 'Stop'
 
-$PolicyKey = 'HKLM:\SOFTWARE\Policies\BraveSoftware\Brave'
+$PolicyKey = if ($UserOnly) { 'HKCU:\SOFTWARE\Policies\BraveSoftware\Brave' }
+             else           { 'HKLM:\SOFTWARE\Policies\BraveSoftware\Brave' }
 $DataDir   = Join-Path $env:LOCALAPPDATA 'BraveSoftware\Brave-Browser\User Data'
 $Stamp     = Get-Date -Format 'yyyyMMdd-HHmmss'
 
@@ -80,12 +82,33 @@ $Policies = [ordered]@{
     DefaultBrowserSettingEnabled            = 0
     SpellCheckServiceEnabled                = 0
     NetworkPredictionOptions                = 2
+
+    # Privacy Sandbox - Chromium's own ad-targeting stack
+    PrivacySandboxAdMeasurementEnabled      = 0
+    PrivacySandboxPromptEnabled             = 0
+    PrivacySandboxSiteEnabledAdsEnabled     = 0
 }
 
 function Test-Admin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
     (New-Object Security.Principal.WindowsPrincipal $id).IsInRole(
         [Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# Re-launch elevated when writing machine-wide policies. Piped invocations
+# (irm … | iex) have no $PSCommandPath to relaunch, so those are told what
+# to do instead.
+function Request-Elevation {
+    param([string[]]$Arguments)
+
+    if (-not $PSCommandPath) {
+        throw 'Machine-wide policies need administrator rights, and this script was piped in rather than saved, so it cannot relaunch itself. Either open PowerShell as administrator and run the same command again, or pass -UserOnly to write user-level policies instead.'
+    }
+
+    Write-Head 'Requesting administrator rights (UAC)'
+    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"") + $Arguments
+    Start-Process powershell -Verb RunAs -ArgumentList $argList
+    exit
 }
 
 # Brave's Preferences files store dotted keys as nested objects.
@@ -138,20 +161,26 @@ function Update-PrefsFile {
 #  Uninstall
 # -----------------------------------------------------------------------------
 if ($Uninstall) {
-    if (-not (Test-Admin)) { throw 'Run this in an elevated PowerShell (Run as administrator).' }
+    if (-not $UserOnly -and -not (Test-Admin)) { Request-Elevation -Arguments @('-Uninstall') }
 
     Write-Head 'Removing policies'
-    if (Test-Path $PolicyKey) {
-        Remove-Item -Path $PolicyKey -Recurse -Force
-        Write-Ok $PolicyKey
-    } else {
-        Write-Warn 'no policy key found'
+    $found = $false
+    foreach ($key in @($PolicyKey, 'HKCU:\SOFTWARE\Policies\BraveSoftware\Brave')) {
+        if (Test-Path $key) {
+            Remove-Item -Path $key -Recurse -Force
+            Write-Ok $key
+            $found = $true
+        }
     }
+    if (-not $found) { Write-Warn 'no policy key found' }
     Write-Host ''
     Write-Host 'Profile preferences are not reverted automatically.'
     Write-Host "Restore a *.bak-* file next to Preferences / Local State if needed."
     return
 }
+
+# Elevate before touching anything, so Brave is not closed twice.
+if (-not $UserOnly -and -not (Test-Admin)) { Request-Elevation -Arguments @() }
 
 # -----------------------------------------------------------------------------
 #  Quit Brave — it rewrites its preference files on exit
@@ -167,20 +196,15 @@ Start-Sleep -Seconds 1
 # -----------------------------------------------------------------------------
 #  1. Registry policies
 # -----------------------------------------------------------------------------
-if (-not $NoPolicies) {
-    if (-not (Test-Admin)) {
-        throw 'Policies need administrator rights. Open PowerShell as administrator and re-run, or pass -NoPolicies to patch profile preferences only.'
-    }
-
-    Write-Head 'Applying policies'
-    if (-not (Test-Path $PolicyKey)) { New-Item -Path $PolicyKey -Force | Out-Null }
-    foreach ($name in $Policies.Keys) {
-        New-ItemProperty -Path $PolicyKey -Name $name -Value $Policies[$name] `
-                         -PropertyType DWord -Force | Out-Null
-    }
-    Write-Ok "$($Policies.Count) policies written to $PolicyKey"
-    Write-Host ''
+Write-Head 'Applying policies'
+if (-not (Test-Path $PolicyKey)) { New-Item -Path $PolicyKey -Force | Out-Null }
+foreach ($name in $Policies.Keys) {
+    New-ItemProperty -Path $PolicyKey -Name $name -Value $Policies[$name] `
+                     -PropertyType DWord -Force | Out-Null
 }
+Write-Ok "$($Policies.Count) policies written to $PolicyKey"
+if ($UserOnly) { Write-Warn 'user-level policies; machine-wide ones override these if present' }
+Write-Host ''
 
 # -----------------------------------------------------------------------------
 #  2. Profile preferences — toolbar buttons and other non-policy toggles
@@ -194,6 +218,7 @@ if (-not (Test-Path -LiteralPath $DataDir)) {
         'brave.new_tab_page.show_brave_today'          = $false
         'brave.new_tab_page.show_brave_news'           = $false
         'brave.today.enabled'                          = $false
+        'browser.check_default_browser'                = $false
         'brave.rewards.show_brave_rewards_button'      = $false
         'brave.rewards.show_button'                    = $false
         'brave.wallet.show_wallet_icon_on_toolbar'     = $false
@@ -208,9 +233,11 @@ if (-not (Test-Path -LiteralPath $DataDir)) {
         'brave.stats.ping_enabled'                     = $false
     }
 
+    # Opt-in: these cover sponsored (ad) wallpapers only. Brave's own stock
+    # photos are controlled by show_background_image, which is never touched.
     if ($Sponsored) {
-        $profilePrefs['brave.new_tab_page.show_sponsored_images']        = $false
-        $profilePrefs['brave.new_tab_page.show_branded_wallpaper']       = $false
+        $profilePrefs['brave.new_tab_page.show_sponsored_images']          = $false
+        $profilePrefs['brave.new_tab_page.show_branded_wallpaper']         = $false
         $profilePrefs['brave.new_tab_page.branded_wallpaper_notification'] = $false
     }
 

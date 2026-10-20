@@ -9,7 +9,7 @@
 #  Usage:
 #     ./brave-debloat.sh                  apply everything
 #     ./brave-debloat.sh --no-profile     skip the configuration profile
-#     ./brave-debloat.sh --sponsored      also disable sponsored wallpapers
+#     ./brave-debloat.sh --sponsored      also disable sponsored (ad) wallpapers
 #     ./brave-debloat.sh --uninstall      revert what this script set
 #
 #  Shields and auto-updates are never touched.
@@ -107,6 +107,11 @@ POLICIES=(
   "UrlKeyedAnonymizedDataCollectionEnabled|bool|false"
   "FeedbackSurveysEnabled|bool|false"
   "PromotionalTabsEnabled|bool|false"
+
+  # Privacy Sandbox — Chromium's own ad-targeting stack
+  "PrivacySandboxAdMeasurementEnabled|bool|false"
+  "PrivacySandboxPromptEnabled|bool|false"
+  "PrivacySandboxSiteEnabledAdsEnabled|bool|false"
   "BackgroundModeEnabled|bool|false"
   "DefaultBrowserSettingEnabled|bool|false"
   "SpellCheckServiceEnabled|bool|false"
@@ -275,6 +280,7 @@ PROFILE = {
     "brave.new_tab_page.show_brave_today": False,
     "brave.new_tab_page.show_brave_news": False,
     "brave.today.enabled": False,
+    "browser.check_default_browser": False,
     "brave.rewards.show_brave_rewards_button": False,
     "brave.rewards.show_button": False,
     "brave.wallet.show_wallet_icon_on_toolbar": False,
@@ -289,6 +295,8 @@ PROFILE = {
     "brave.stats.ping_enabled": False,
 }
 
+# Opt-in: these cover sponsored (ad) wallpapers only. Brave's own stock
+# photos are controlled by show_background_image, which is never touched.
 if sponsored:
     PROFILE.update({
         "brave.new_tab_page.show_sponsored_images": False,

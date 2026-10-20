@@ -41,16 +41,18 @@ Restart Brave afterwards. On macOS there is one manual step — see
 | Brave telemetry | P3A analytics, daily usage ping, Web Discovery |
 | Chromium telemetry | Crash & usage reports, URL-keyed data collection, surveys |
 | Nags | Promotional tabs, "make Brave default" prompts, background mode |
+| Privacy Sandbox | Chromium's own ad-targeting stack — measurement, prompts, site-enabled ads |
 | Network | Prefetch / prerender, spell-check service |
 
-23 policies in total, plus a set of profile preferences for toolbar buttons
+26 policies in total, plus a set of profile preferences for toolbar buttons
 that have no policy equivalent.
 
 **Not touched:** Shields, the ad blocker, auto-updates, sync, passwords,
 your profile data.
 
-Sponsored wallpapers on the new tab page are left alone by default — the
-stock Brave photo backgrounds are not ads. To remove those too:
+**New tab backgrounds are left alone.** Brave's own photo wallpapers are not
+ads, and nothing here touches them. Sponsored wallpapers — the ones that are
+ads — can be disabled on request:
 
 ```bash
 ./brave-debloat.sh --sponsored          # macOS
@@ -146,7 +148,7 @@ next to `Preferences` / `Local State` if you want them back.
 |---|---|
 | `--sponsored` / `-Sponsored` | Also disable sponsored new-tab wallpapers |
 | `--no-profile` (macOS) | Skip the configuration profile |
-| `-NoPolicies` (Windows) | Patch profile preferences only; no admin needed |
+| `-UserOnly` (Windows) | Write policies to HKCU instead of HKLM; no admin needed |
 | `--uninstall` / `-Uninstall` | Revert what the script set |
 
 Passing a flag through the one-line install:
@@ -169,6 +171,11 @@ curl -fsSL https://raw.githubusercontent.com/vladtvoeit/brave-debloat/main/macos
   occasionally new preference keys that default to on.
 - Policy names follow Brave's published policy list. A policy your Brave
   version does not know is simply ignored.
+- Brave will start reporting that it is "managed by your organization". That
+  is expected — the organisation is you.
+- Run from a script file, the Windows version requests elevation itself via
+  UAC. Piped through `iex` it cannot, so start an administrator PowerShell
+  first, or use `-UserOnly`.
 
 ## License
 

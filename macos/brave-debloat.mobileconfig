@@ -2,37 +2,22 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>PayloadType</key>
-	<string>Configuration</string>
-	<key>PayloadVersion</key>
-	<integer>1</integer>
-	<key>PayloadIdentifier</key>
-	<string>com.local.brave-debloat</string>
-	<key>PayloadUUID</key>
-	<string>8A503FE9-B699-4440-9292-634CF9BB0750</string>
-	<key>PayloadDisplayName</key>
-	<string>Brave Debloat</string>
-	<key>PayloadDescription</key>
-	<string>Отключает Rewards, Wallet, VPN, Leo AI, News, Talk, Tor, IPFS и телеметрию в Brave Browser.</string>
-	<key>PayloadOrganization</key>
-	<string>local</string>
-	<key>PayloadScope</key>
-	<string>System</string>
-	<key>PayloadRemovalDisallowed</key>
-	<false/>
+	<key>PayloadType</key><string>Configuration</string>
+	<key>PayloadVersion</key><integer>1</integer>
+	<key>PayloadIdentifier</key><string>com.local.brave-debloat</string>
+	<key>PayloadDisplayName</key><string>Brave Debloat</string>
+	<key>PayloadDescription</key><string>Disables Rewards, Wallet, VPN, Leo AI, News, Talk, Tor, IPFS and telemetry in Brave Browser.</string>
+	<key>PayloadScope</key><string>System</string>
+	<key>PayloadRemovalDisallowed</key><false/>
+	<key>PayloadUUID</key><string>41FD4CC4-BE31-4AB8-A100-7D9A0F4E3502</string>
 	<key>PayloadContent</key>
 	<array>
 		<dict>
-			<key>PayloadType</key>
-			<string>com.apple.ManagedClient.preferences</string>
-			<key>PayloadVersion</key>
-			<integer>1</integer>
-			<key>PayloadIdentifier</key>
-			<string>com.local.brave-debloat.prefs</string>
-			<key>PayloadUUID</key>
-			<string>1B2B8122-64EB-45A9-92E0-1D92EB06A53F</string>
-			<key>PayloadDisplayName</key>
-			<string>Brave Browser Policies</string>
+			<key>PayloadType</key><string>com.apple.ManagedClient.preferences</string>
+			<key>PayloadVersion</key><integer>1</integer>
+			<key>PayloadIdentifier</key><string>com.local.brave-debloat.prefs</string>
+			<key>PayloadDisplayName</key><string>Brave Browser Policies</string>
+			<key>PayloadUUID</key><string>80284ACB-865C-498E-8CE8-4BF2C298C786</string>
 			<key>PayloadContent</key>
 			<dict>
 				<key>com.brave.Browser</key>
@@ -42,52 +27,32 @@
 						<dict>
 							<key>mcx_preference_settings</key>
 							<dict>
-								<key>BraveRewardsDisabled</key>
-								<true/>
-								<key>BraveWalletDisabled</key>
-								<true/>
-								<key>BraveVPNDisabled</key>
-								<true/>
-								<key>BraveAIChatEnabled</key>
-								<false/>
-								<key>BraveNewsDisabled</key>
-								<true/>
-								<key>BraveTalkDisabled</key>
-								<true/>
-								<key>BravePlaylistEnabled</key>
-								<false/>
-								<key>BraveSpeedreaderEnabled</key>
-								<false/>
-								<key>BraveWaybackMachineEnabled</key>
-								<false/>
-								<key>TorDisabled</key>
-								<true/>
-								<key>IPFSEnabled</key>
-								<false/>
-								<key>BraveP3AEnabled</key>
-								<false/>
-								<key>BraveStatsPingEnabled</key>
-								<false/>
-								<key>BraveWebDiscoveryEnabled</key>
-								<false/>
-								<key>MetricsReportingEnabled</key>
-								<false/>
-								<key>SafeBrowsingExtendedReportingEnabled</key>
-								<false/>
-								<key>UrlKeyedAnonymizedDataCollectionEnabled</key>
-								<false/>
-								<key>FeedbackSurveysEnabled</key>
-								<false/>
-								<key>PromotionalTabsEnabled</key>
-								<false/>
-								<key>BackgroundModeEnabled</key>
-								<false/>
-								<key>DefaultBrowserSettingEnabled</key>
-								<false/>
-								<key>SpellCheckServiceEnabled</key>
-								<false/>
-								<key>NetworkPredictionOptions</key>
-								<integer>2</integer>
+								<key>BraveRewardsDisabled</key><true/>
+								<key>BraveWalletDisabled</key><true/>
+								<key>BraveVPNDisabled</key><true/>
+								<key>BraveAIChatEnabled</key><false/>
+								<key>BraveNewsDisabled</key><true/>
+								<key>BraveTalkDisabled</key><true/>
+								<key>BravePlaylistEnabled</key><false/>
+								<key>BraveSpeedreaderEnabled</key><false/>
+								<key>BraveWaybackMachineEnabled</key><false/>
+								<key>TorDisabled</key><true/>
+								<key>IPFSEnabled</key><false/>
+								<key>BraveP3AEnabled</key><false/>
+								<key>BraveStatsPingEnabled</key><false/>
+								<key>BraveWebDiscoveryEnabled</key><false/>
+								<key>MetricsReportingEnabled</key><false/>
+								<key>SafeBrowsingExtendedReportingEnabled</key><false/>
+								<key>UrlKeyedAnonymizedDataCollectionEnabled</key><false/>
+								<key>FeedbackSurveysEnabled</key><false/>
+								<key>PromotionalTabsEnabled</key><false/>
+								<key>PrivacySandboxAdMeasurementEnabled</key><false/>
+								<key>PrivacySandboxPromptEnabled</key><false/>
+								<key>PrivacySandboxSiteEnabledAdsEnabled</key><false/>
+								<key>BackgroundModeEnabled</key><false/>
+								<key>DefaultBrowserSettingEnabled</key><false/>
+								<key>SpellCheckServiceEnabled</key><false/>
+								<key>NetworkPredictionOptions</key><integer>2</integer>
 							</dict>
 						</dict>
 					</array>

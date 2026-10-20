@@ -23,7 +23,9 @@
     Brave honours both; machine-wide policies are the stronger of the two.
 
 .PARAMETER Uninstall
-    Remove the policies this script set.
+    Remove the policies this script set. Without -UserOnly this clears both
+    HKLM and HKCU, since a machine may carry leftovers from an earlier
+    -UserOnly run; each hive is reported separately.
 
 .EXAMPLE
     .\brave-debloat.ps1
@@ -182,16 +184,20 @@ if ($Uninstall) {
     $targets = @($PolicyKey)
     if (-not $UserOnly) { $targets += 'HKCU:\SOFTWARE\Policies\BraveSoftware\Brave' }
 
-    $removed = 0
+    $total = 0
     foreach ($key in $targets) {
         if (-not (Test-Path $key)) { continue }
 
+        # Counted per hive: a single total would hide which one was touched,
+        # and a plain -Uninstall deliberately clears HKCU as well.
+        $n = 0
         foreach ($name in $Policies.Keys) {
             if ($null -ne (Get-ItemProperty -Path $key -Name $name -ErrorAction SilentlyContinue)) {
                 Remove-ItemProperty -Path $key -Name $name -Force
-                $removed++
+                $n++
             }
         }
+        $total += $n
 
         # The key may hold policies this script never set - an admin's own
         # DnsOverHttpsMode, ExtensionInstallForcelist and so on. Drop the key
@@ -200,13 +206,12 @@ if ($Uninstall) {
         $subs = @(Get-ChildItem $key -ErrorAction SilentlyContinue)
         if ($left.Count -eq 0 -and $subs.Count -eq 0) {
             Remove-Item -Path $key -Force
-            Write-Ok "$key (emptied and removed)"
+            Write-Ok "$key - $n removed, key was left empty and deleted"
         } else {
-            Write-Ok "$key ($($left.Count) unrelated values left untouched)"
+            Write-Ok "$key - $n removed, $($left.Count) unrelated values left untouched"
         }
     }
-    if ($removed -eq 0) { Write-Warn 'none of this script''s policies were present' }
-    else { Write-Ok "$removed values removed" }
+    if ($total -eq 0) { Write-Warn 'none of this script''s policies were present' }
     Write-Host ''
     Write-Host 'Profile preferences are not reverted automatically.'
     Write-Host "Restore a *.bak-* file next to Preferences / Local State if needed."

@@ -23,6 +23,7 @@ DATA="$HOME/Library/Application Support/BraveSoftware/Brave-Browser"
 MANAGED="/Library/Managed Preferences/com.brave.Browser.plist"
 PROFILE_OUT="${TMPDIR:-/tmp}/brave-debloat.mobileconfig"
 TS="$(date +%Y%m%d-%H%M%S)"
+REPO="https://raw.githubusercontent.com/vladtvoeit/brave-debloat/main"
 
 WANT_PROFILE=1
 WANT_SPONSORED=0
@@ -126,10 +127,18 @@ POLICIES=(
 # -----------------------------------------------------------------------------
 if [ "$WANT_UNINSTALL" = "1" ]; then
   bold "==> Removing user-domain policy keys"
+  removed=0
   for entry in "${POLICIES[@]}"; do
     IFS='|' read -r k _ _ <<< "$entry"
-    defaults delete "$DOMAIN" "$k" 2>/dev/null && ok "$k" || true
+    if defaults delete "$DOMAIN" "$k" 2>/dev/null; then
+      removed=$((removed + 1))
+    fi
   done
+  if [ "$removed" -eq 0 ]; then
+    warn "none of this script's policies were present"
+  else
+    ok "$removed keys removed"
+  fi
   echo
   bold "Configuration profile"
   echo "   Remove it by hand: System Settings → General → Device Management"
@@ -275,7 +284,7 @@ echo
 # -----------------------------------------------------------------------------
 if [ ! -d "$DATA" ]; then
   warn "Brave profile not found — skipping profile preferences"
-elif ! head -c 1 "$DATA/Local State" >/dev/null 2>&1; then
+elif ! ls "$DATA" >/dev/null 2>&1; then
   bold "==> Profile preferences"
   warn "no access to $DATA"
   echo "     macOS protects browser profile folders. Grant Full Disk Access to"
@@ -344,7 +353,7 @@ def patch(path, prefs):
         with open(path, encoding="utf-8") as fh:
             doc = json.load(fh)
     except Exception as exc:
-        print(f"   ! skipped {os.path.basename(path)}: {exc}")
+        print(f"   ! skipped {os.path.relpath(path, data)}: {exc}")
         return
     try:
         shutil.copy2(path, f"{path}.bak-{ts}")
@@ -357,7 +366,13 @@ def patch(path, prefs):
             json.dump(doc, fh, ensure_ascii=False)
         os.replace(tmp, path)
     except Exception as exc:
-        print(f"   ! skipped {os.path.basename(path)}: {exc}")
+        tmp = f"{path}.tmp-{ts}"
+        if os.path.exists(tmp):
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        print(f"   ! skipped {os.path.relpath(path, data)}: {exc}")
         return
     print(f"   \033[32m✔\033[0m {os.path.relpath(path, data)}")
 
@@ -386,4 +401,8 @@ echo
 echo "  Verify:  brave://policy    — every policy listed, status OK"
 echo "           brave://settings  — Rewards / Wallet / VPN / Leo are gone"
 echo
-echo "  Revert:  $SELF_NAME --uninstall"
+if [ -n "$SELF" ]; then
+  echo "  Revert:  $SELF_NAME --uninstall"
+else
+  echo "  Revert:  curl -fsSL $REPO/macos/brave-debloat.sh | bash -s -- --uninstall"
+fi

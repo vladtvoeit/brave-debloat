@@ -27,6 +27,13 @@ the same dead ends are not explored twice.
   kept only for upstream Chromium policies that do accept the recommended
   level. The configuration profile is required, not optional — never present
   `--no-profile` as an equivalent route.
+- **`HKCU\SOFTWARE\Policies` is writable only by administrators**, so
+  `-UserOnly` is about *scope*, not privilege — it still needs an elevated
+  session. It is deliberately not auto-elevated: if a standard user supplies a
+  different admin's password, the policies would land in that admin's hive.
+  For the same reason there is no pre-elevation HKCU cleanup in `-Uninstall`;
+  one was added on review advice and could never have run, since the only
+  process that would execute it is the unelevated one Windows refuses.
 - **Windows writes to the registry, and that is durable.** `HKLM` and `HKCU`
   under `SOFTWARE\Policies\BraveSoftware\Brave` both survive `gpupdate /force`
   (verified 2026-10-20), so the macOS problem has no Windows equivalent.
@@ -123,6 +130,12 @@ the same dead ends are not explored twice.
   and `--help` would `sed` a binary. It does not: `$0` is the bare word `sh`,
   `zsh` or `bash` in every piped form, including `sh < file`, and the guard
   short-circuits. Verified three times; do not "fix" it again.
+- **A PowerShell parameter set is resolved at invocation, not at parse
+  time.** `Split-Path -LiteralPath $p -Leaf` parses cleanly and fails at run
+  time with "parameter set cannot be resolved", because 5.1 keeps
+  `-LiteralPath` and `-Leaf` in different sets. The syntax check that catches
+  everything else cannot catch this, and it broke every profile patch for one
+  commit. Prefer `[IO.Path]::GetDirectoryName` / `GetFileName`.
 - **`raw.githubusercontent.com` caches branch URLs for minutes.** After a push,
   a one-line install can still fetch the previous version — this produced a
   bug report for code that had already been fixed. To test a fresh commit, use

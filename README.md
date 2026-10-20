@@ -158,7 +158,7 @@ recent copies; older ones are pruned, since `Preferences` runs to megabytes.
 |---|---|
 | `--sponsored` / `-Sponsored` | Also disable sponsored new-tab wallpapers |
 | `--no-profile` (macOS) | Skip the configuration profile |
-| `-UserOnly` (Windows) | Write policies to HKCU instead of HKLM; no admin needed |
+| `-UserOnly` (Windows) | Write policies to HKCU instead of HKLM, per-account rather than machine-wide; still needs admin |
 | `--uninstall` / `-Uninstall` | Revert what the script set |
 
 Passing a flag through the one-line install:

@@ -19,8 +19,10 @@
     stock photos are never touched.
 
 .PARAMETER UserOnly
-    Write policies to HKCU instead of HKLM. No administrator rights needed.
-    Brave honours both; machine-wide policies are the stronger of the two.
+    Write policies to HKCU instead of HKLM, so they apply to this account
+    rather than the machine. Brave honours both, and machine-wide policies win
+    where they overlap. This still needs administrator rights: Windows
+    restricts HKCU\SOFTWARE\Policies to administrators.
 
 .PARAMETER Uninstall
     Remove the policies this script set. Without -UserOnly this clears both
@@ -44,12 +46,7 @@ param(
     # user is a standard account and types a separate admin's credentials, the
     # elevated process gets that admin's LOCALAPPDATA, and without this it
     # would patch the wrong profile.
-    [string]$DataDirOverride,
-
-    # Also set automatically on relaunch: how many HKCU values the unelevated
-    # process already removed. Without it the elevated run walks HKCU a second
-    # time, finds nothing, and contradicts what was just printed.
-    [int]$HkcuCleared = -1
+    [string]$DataDirOverride
 )
 
 $ErrorActionPreference = 'Stop'
@@ -251,49 +248,22 @@ if ($Uninstall) {
     # HKCU must be cleared before elevating: a standard user who types a
     # separate admin's password gets that admin's hive afterwards, and their
     # own user-level policies would survive untouched.
-    $hkcu = 'HKCU:\SOFTWARE\Policies\BraveSoftware\Brave'
-    if (-not $UserOnly -and -not (Test-Admin) -and (Test-Path $hkcu)) {
-        # Windows restricts HKCU\Software\Policies to administrators, so an
-        # unelevated process cannot delete here. Try anyway -- it succeeds for
-        # an admin whose token is merely unelevated -- and fall through to the
-        # elevated pass when it does not.
-        $n = 0
-        try {
-            foreach ($name in $Policies.Keys) {
-                if ($null -ne (Get-ItemProperty -Path $hkcu -Name $name -ErrorAction SilentlyContinue)) {
-                    Remove-ItemProperty -Path $hkcu -Name $name -Force
-                    $n++
-                }
-            }
-        } catch {
-            Write-Warn "cannot clear $hkcu without elevation - leaving it to the elevated pass"
-            $n = -1
-        }
-        if ($n -gt 0) {
-            Write-Ok "$hkcu - $n removed (before elevating)"
-            $script:HkcuCleared = $n
-        } elseif ($n -eq 0) {
-            $script:HkcuCleared = 0
-        }
-        if (-not @((Get-Item $hkcu).Property).Count -and
-            -not @(Get-ChildItem $hkcu -ErrorAction SilentlyContinue).Count) {
-            Remove-Item -Path $hkcu -Force
-        }
-    }
-
+    # No pre-elevation HKCU clean: Windows restricts HKCU\SOFTWARE\Policies
+    # to administrators, so the unelevated process -- the only one that would
+    # run such a block -- is refused outright. An earlier round added one on
+    # review advice; it could never have worked.
+    #
+    # The consequence is that for a standard user who supplies a separate
+    # admin's password, the elevated pass sees that admin's HKCU, not theirs.
+    # Their own user-level policies have to be removed from their own elevated
+    # session.
     if (-not $UserOnly -and -not (Test-Admin)) {
-        $fwd = @('-Uninstall')
-        if ($HkcuCleared -ge 0) { $fwd += @('-HkcuCleared', $HkcuCleared) }
-        Request-Elevation -Arguments $fwd
+        Request-Elevation -Arguments @('-Uninstall')
     }
 
     Write-Head 'Removing policies'
     $targets = @($PolicyKey)
-    # Skip HKCU when the unelevated process already handled it; its hive may
-    # not even be the one this process can see.
-    if (-not $UserOnly -and $HkcuCleared -lt 0) {
-        $targets += 'HKCU:\SOFTWARE\Policies\BraveSoftware\Brave'
-    }
+    if (-not $UserOnly) { $targets += 'HKCU:\SOFTWARE\Policies\BraveSoftware\Brave' }
 
     $total = 0
     foreach ($key in $targets) {
@@ -324,10 +294,6 @@ if ($Uninstall) {
             if ($subs.Count) { $kept += "$($subs.Count) subkeys" }
             Write-Ok "$key - $n removed, $($kept -join ' and ') left untouched"
         }
-    }
-    if ($HkcuCleared -gt 0) {
-        Write-Ok "HKCU - $HkcuCleared removed before elevating"
-        $total += $HkcuCleared
     }
     if ($total -eq 0) { Write-Warn 'none of this script''s policies were present' }
     Write-Host ''
@@ -398,6 +364,10 @@ if ($brave) {
 # -----------------------------------------------------------------------------
 #  1. Registry policies
 # -----------------------------------------------------------------------------
+if ($UserOnly -and -not (Test-Admin)) {
+    throw 'HKCU\SOFTWARE\Policies is writable only by administrators, so -UserOnly needs an elevated session too. It is not auto-elevated: if you supply a different admin account, the policies would land in that account''s hive instead of yours.'
+}
+
 Write-Head 'Applying policies'
 if (-not (Test-Path $PolicyKey)) { New-Item -Path $PolicyKey -Force | Out-Null }
 foreach ($name in $Policies.Keys) {

@@ -74,39 +74,61 @@ warn() { printf '   \033[33m!\033[0m %s\n' "$1"; }
 # True only if macOS has already materialised every expected policy from an
 # installed profile, with matching values.
 profile_is_current() {
-  # The plist alone is not proof: an older version of this script wrote one
-  # by hand, and macOS deletes those at the next reboot. Require the profile
-  # to actually be installed.
-  # Not piped into grep on purpose: grep -q exits at the first match, the
-  # producer takes SIGPIPE, and pipefail turns that into "not installed".
-  local installed
-  installed="$(system_profiler SPConfigurationProfileDataType 2>/dev/null)" || return 1
-  case "$installed" in
-    *com.local.brave-debloat*) ;;
-    *) return 1 ;;
-  esac
+  # The plist in /Library/Managed Preferences is merged from every installed
+  # profile, so comparing against it exactly would call ours out of date on a
+  # Mac that has any other profile touching com.brave.Browser. Compare the key
+  # set of our own payload instead, and the effective values from the plist.
   [ -f "$MANAGED" ] || return 1
-  plutil -convert json -o - "$MANAGED" 2>/dev/null | python3 -c '
-import json, sys
-try:
-    live = json.load(sys.stdin)
-except Exception:
-    sys.exit(1)
+
+  local spfile livefile rc
+  spfile="$(mktemp)"; livefile="$(mktemp)"
+  if ! system_profiler SPConfigurationProfileDataType -json >"$spfile" 2>/dev/null \
+     || ! plutil -convert json -o - "$MANAGED" >"$livefile" 2>/dev/null; then
+    rm -f "$spfile" "$livefile"
+    return 1
+  fi
+
+  python3 -c '
+import json, re, sys
+
+payload_path, live_path = sys.argv[1], sys.argv[2]
 expected = {}
-for entry in sys.argv[1:]:
+for entry in sys.argv[3:]:
     key, kind, raw = entry.split("|")
     expected[key] = raw == "true" if kind == "bool" else int(raw)
 
-# An exact match, not a subset: a policy dropped from POLICIES would otherwise
-# stay active in an already-installed profile forever.
-if set(live) != set(expected):
+
+def profiles(node):
+    if isinstance(node, dict):
+        if node.get("spconfigprofile_profile_identifier") == "com.local.brave-debloat":
+            yield node
+        for value in node.values():
+            yield from profiles(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from profiles(value)
+
+
+installed = set()
+for profile in profiles(json.load(open(payload_path))):
+    for item in profile.get("_items", []):
+        blob = item.get("spconfigprofile_payload_data", "")
+        installed |= set(re.findall(r"^\s*\"?([A-Za-z][A-Za-z0-9]*)\"?\s*=\s*", blob, re.M))
+installed -= {"PayloadContent", "Forced", "mcx_preference_settings"}
+
+if not installed or installed != set(expected):
     sys.exit(1)
+
+live = json.load(open(live_path))
 for key, want in expected.items():
-    got = live[key]
+    got = live.get(key)
     if type(got) is not type(want) or got != want:
         sys.exit(1)
 sys.exit(0)
-' "${POLICIES[@]}"
+' "$spfile" "$livefile" "${POLICIES[@]}"
+  rc=$?
+  rm -f "$spfile" "$livefile"
+  return $rc
 }
 
 # -----------------------------------------------------------------------------
@@ -172,10 +194,14 @@ if [ "$WANT_UNINSTALL" = "1" ]; then
   bold "Configuration profile"
   echo "   Remove it by hand: System Settings → General → Device Management"
   echo "   → \"Brave Debloat\" → remove."
-  open "x-apple.systempreferences:com.apple.Profiles-Settings.extension" 2>/dev/null || true
+  if system_profiler SPConfigurationProfileDataType 2>/dev/null \
+     | grep -q "com.local.brave-debloat"; then
+    open "x-apple.systempreferences:com.apple.Profiles-Settings.extension" 2>/dev/null || true
+  fi
   echo
   echo "   Profile preferences are not reverted automatically."
-  echo "   Restore a *.bak-* file next to Preferences / Local State if needed."
+  echo "   Restore *.bak-initial next to Preferences / Local State for the"
+  echo "   state from before this script first ran, or a *.bak-<timestamp> copy."
   exit 0
 fi
 
@@ -397,13 +423,22 @@ def keep_backups(path):
     Brave updates, so without this the profile directory fills up with copies
     of already-patched state — and the one worth having, from before the first
     run, is the one that scrolls away."""
-    stamped = sorted(glob.glob(f"{path}.bak-2*"))
+    # glob.escape: a profile path may contain [ or ], which glob would
+    # otherwise read as a character class and match nothing.
+    pattern = glob.escape(path) + ".bak-2*"
+    stamped = sorted(glob.glob(pattern))
     initial = f"{path}.bak-initial"
+
+    first_ever = not stamped and not os.path.exists(initial)
     if not os.path.exists(initial):
         shutil.copy2(stamped[0] if stamped else path, initial)
 
-    shutil.copy2(path, f"{path}.bak-{ts}")
-    for stale in sorted(glob.glob(f"{path}.bak-2*"))[:-2]:
+    # On a first run the initial copy is this same file; a second identical
+    # one would be noise.
+    if not first_ever:
+        shutil.copy2(path, f"{path}.bak-{ts}")
+
+    for stale in sorted(glob.glob(pattern))[:-2]:
         try:
             os.unlink(stale)
         except OSError:
@@ -417,21 +452,23 @@ def patch(path, prefs):
     except Exception as exc:
         print(f"   ! skipped {os.path.relpath(path, data)}: {exc}")
         return
+    tmp = f"{path}.tmp-{ts}"
     try:
-        keep_backups(path)
         for key, value in prefs.items():
             deep_set(doc, key, value)
         # Write-then-rename: open(path, "w") truncates immediately, so a
         # failure mid-serialisation would leave an empty Preferences file.
-        tmp = f"{path}.tmp-{ts}"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(doc, fh, ensure_ascii=False)
+        # Only now that the replacement exists on disk is it safe to touch the
+        # backups. Rotating first meant two failed runs in a row could discard
+        # both surviving copies while writing nothing.
+        keep_backups(path)
         # os.replace carries the temp file's mode across, and under the usual
         # umask that would turn Brave's 0600 into a world-readable 0644.
         shutil.copymode(path, tmp)
         os.replace(tmp, path)
     except Exception as exc:
-        tmp = f"{path}.tmp-{ts}"
         if os.path.exists(tmp):
             try:
                 os.unlink(tmp)

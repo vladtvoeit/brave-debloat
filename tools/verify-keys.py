@@ -13,6 +13,7 @@ check here is an exact match on the quoted string.
     python3 tools/verify-keys.py
 """
 
+import pathlib
 import plistlib
 import re
 import sys
@@ -79,33 +80,55 @@ def between(text, opener, closer):
     return text[start:text.index(closer, start)]
 
 
-def grouped_prefs(mac, win):
+def strict(block, pattern, where, failures):
+    """Every meaningful line in a pref block must parse. A findall that simply
+    skips an unrecognised line would let a typo through silently — the exact
+    failure mode this whole script exists to prevent."""
+    for line in block.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or line in ("}", "})", "{"):
+            continue
+        if not pattern.search(line):
+            failures.append(f"{where}: cannot parse line: {line}")
+    return dict(pattern.findall(block))
+
+
+def grouped_prefs(mac, win, failures):
     """The three pref groups per platform, with values, so the scripts cannot
     drift in what they set or where they set it — only names were compared
     before, and a True where a False belongs would have passed."""
     to_bool = lambda s: s.lower() == "true"
 
+    def group(text, opener, closer, pattern, where):
+        raw = strict(between(text, opener, closer), pattern, where, failures)
+        return {k: to_bool(v) for k, v in raw.items()}
+
     mac_groups = {
-        "profile": {k: to_bool(v) for k, v in PY_ENTRY.findall(between(mac, "PROFILE = {", "\n}"))},
-        "sponsored": {k: to_bool(v) for k, v in PY_ENTRY.findall(between(mac, "PROFILE.update({", "})"))},
-        "local_state": {k: to_bool(v) for k, v in PY_ENTRY.findall(between(mac, "LOCAL_STATE = {", "\n}"))},
+        "profile": group(mac, "PROFILE = {", "\n}", PY_ENTRY, "macOS PROFILE"),
+        "sponsored": group(mac, "PROFILE.update({", "})", PY_ENTRY, "macOS sponsored"),
+        "local_state": group(mac, "LOCAL_STATE = {", "\n}", PY_ENTRY, "macOS LOCAL_STATE"),
     }
     win_groups = {
-        "profile": {k: to_bool(v) for k, v in PS_ENTRY.findall(between(win, "$profilePrefs = @{", "\n    }"))},
-        "sponsored": {k: to_bool(v) for k, v in PS_INDEXED.findall(win)},
-        "local_state": {k: to_bool(v) for k, v in PS_ENTRY.findall(between(win, "$localState = @{", "\n    }"))},
+        "profile": group(win, "$profilePrefs = @{", "\n    }", PS_ENTRY, "Windows profilePrefs"),
+        "sponsored": group(win, "if ($Sponsored) {\n", "\n    }", PS_INDEXED, "Windows sponsored"),
+        "local_state": group(win, "$localState = @{", "\n    }", PS_ENTRY, "Windows localState"),
     }
     return mac_groups, win_groups
 
 
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+
 def read(path):
-    with open(path, encoding="utf-8") as handle:
+    with open(ROOT / path, encoding="utf-8") as handle:
         return handle.read()
 
 
 def main():
     mac = read("macos/brave-debloat.sh")
     win = read("windows/brave-debloat.ps1")
+
+    failures = []
 
     known = set()
     for header in HEADERS:
@@ -116,9 +139,7 @@ def main():
         known.update(PREF.findall(body))
     print(f"  {len(known)} pref names read from {len(HEADERS)} brave-core files")
 
-    failures = []
-
-    mac_groups, win_groups = grouped_prefs(mac, win)
+    mac_groups, win_groups = grouped_prefs(mac, win, failures)
 
     for group in ("profile", "sponsored", "local_state"):
         left, right = mac_groups[group], win_groups[group]
@@ -153,6 +174,7 @@ def main():
         name: (1 if value == "true" else 0) if kind == "bool" else int(value)
         for name, kind, value in MAC_POLICY.findall(mac)
     }
+    mac_policy_kinds = {name: kind for name, kind, _ in MAC_POLICY.findall(mac)}
     win_policy_values = {name: int(value) for name, value in WIN_POLICY.findall(win)}
 
     for name in sorted(set(mac_policy_values) | set(win_policy_values)):
@@ -179,18 +201,24 @@ def main():
             continue
 
         # The YAML is already fetched, so the declared type is free to check.
+        # Chromium spells a boolean policy "main" at the top level and an
+        # integer one "int" or "int-enum"; "boolean" only appears indented
+        # inside schema:, which is why matching it here never fired.
         declared = re.search(r"^type:\s*(\S+)", definition, re.M)
-        if declared:
-            kind = declared.group(1)
-            used_as_int = mac_policy_values.get(name) not in (0, 1)
-            if kind in ("int", "integer") and not used_as_int:
-                failures.append(f"policy {name} is an {kind} in brave-core but set as a boolean")
-            elif kind in ("bool", "boolean") and used_as_int:
-                failures.append(f"policy {name} is a {kind} in brave-core but set as an integer")
+        if declared and name in mac_policy_kinds:
+            yaml_kind = {"main": "bool", "int": "integer", "int-enum": "integer"}.get(
+                declared.group(1)
+            )
+            used = mac_policy_kinds[name]
+            if yaml_kind and yaml_kind != used:
+                failures.append(
+                    f"policy {name} is {declared.group(1)} in brave-core "
+                    f"({yaml_kind}) but the script writes it as {used}"
+                )
 
     # The bundled .mobileconfig is offered as a hand-install route, so it must
     # not drift from what the script generates.
-    with open("macos/brave-debloat.mobileconfig", "rb") as handle:
+    with open(ROOT / "macos/brave-debloat.mobileconfig", "rb") as handle:
         payload = plistlib.load(handle)["PayloadContent"][0]["PayloadContent"]
     bundled = payload["com.brave.Browser"]["Forced"][0]["mcx_preference_settings"]
 
@@ -205,6 +233,11 @@ def main():
             failures.append(f"bundled profile is missing policy: {name}")
         elif name not in expected:
             failures.append(f"bundled profile has a policy the script does not set: {name}")
+        elif type(bundled[name]) is not type(expected[name]):
+            failures.append(
+                f"bundled profile has {name} as {type(bundled[name]).__name__}, "
+                f"script writes {type(expected[name]).__name__}"
+            )
         elif bundled[name] != expected[name]:
             failures.append(
                 f"bundled profile disagrees on {name}: "

@@ -44,7 +44,12 @@ param(
     # user is a standard account and types a separate admin's credentials, the
     # elevated process gets that admin's LOCALAPPDATA, and without this it
     # would patch the wrong profile.
-    [string]$DataDirOverride
+    [string]$DataDirOverride,
+
+    # Also set automatically on relaunch: how many HKCU values the unelevated
+    # process already removed. Without it the elevated run walks HKCU a second
+    # time, finds nothing, and contradicts what was just printed.
+    [int]$HkcuCleared = -1
 )
 
 $ErrorActionPreference = 'Stop'
@@ -179,24 +184,6 @@ function Update-PrefsFile {
     }
 
     try {
-        # Keep the untouched original forever, plus the two most recent
-        # copies. Preferences runs to megabytes and the README tells people to
-        # re-run after Brave updates, so otherwise the profile directory fills
-        # with copies of already-patched state and the one worth having, from
-        # before the first run, scrolls away.
-        $stamped = @(Get-ChildItem "$Path.bak-2*" -ErrorAction SilentlyContinue | Sort-Object Name)
-        $initial = "$Path.bak-initial"
-        if (-not (Test-Path -LiteralPath $initial)) {
-            $source = if ($stamped.Count) { $stamped[0].FullName } else { $Path }
-            Copy-Item -LiteralPath $source -Destination $initial -Force
-        }
-
-        Copy-Item -LiteralPath $Path -Destination "$Path.bak-$Stamp" -Force
-
-        $stamped = @(Get-ChildItem "$Path.bak-2*" -ErrorAction SilentlyContinue | Sort-Object Name)
-        if ($stamped.Count -gt 2) {
-            $stamped[0..($stamped.Count - 3)] | Remove-Item -Force -ErrorAction SilentlyContinue
-        }
         foreach ($key in $Prefs.Keys) { Set-DeepValue -Root $doc -Path $key -Value $Prefs[$key] }
 
         # Depth must be generous: Brave's Preferences nest well past the default
@@ -211,6 +198,38 @@ function Update-PrefsFile {
         # Move-Item -Force, not [IO.File]::Replace: PowerShell binds $null
         # to the backup-path parameter as an empty string, which Replace
         # rejects. On one volume this is a single rename either way.
+        # Only now that the replacement exists on disk is it safe to touch the
+        # backups. Rotating first meant two failed runs in a row could discard
+        # both surviving copies while writing nothing.
+        #
+        # -LiteralPath with -Filter, not a wildcard path: a profile directory
+        # may contain [ or ], which PowerShell would read as a range.
+        $dir  = Split-Path -LiteralPath $Path
+        $leaf = Split-Path -LiteralPath $Path -Leaf
+        $stamped = @(Get-ChildItem -LiteralPath $dir -Filter "$leaf.bak-2*" -ErrorAction SilentlyContinue |
+                     Sort-Object Name)
+        $initial = "$Path.bak-initial"
+        $firstEver = (-not $stamped.Count) -and (-not (Test-Path -LiteralPath $initial))
+
+        if (-not (Test-Path -LiteralPath $initial)) {
+            $source = if ($stamped.Count) { $stamped[0].FullName } else { $Path }
+            Copy-Item -LiteralPath $source -Destination $initial -Force
+        }
+
+        # On a first run the initial copy is this same file; a second identical
+        # one would be noise.
+        if (-not $firstEver) {
+            Copy-Item -LiteralPath $Path -Destination "$Path.bak-$Stamp" -Force
+        }
+
+        $stamped = @(Get-ChildItem -LiteralPath $dir -Filter "$leaf.bak-2*" -ErrorAction SilentlyContinue |
+                     Sort-Object Name)
+        if ($stamped.Count -gt 2) {
+            $stamped[0..($stamped.Count - 3)] | ForEach-Object {
+                Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+            }
+        }
+
         Move-Item -LiteralPath $tmp -Destination $Path -Force
     } catch {
         if ($tmp -and (Test-Path -LiteralPath $tmp)) {
@@ -240,17 +259,26 @@ if ($Uninstall) {
             }
         }
         if ($n) { Write-Ok "$hkcu - $n removed (before elevating)" }
+        $script:HkcuCleared = $n
         if (-not @((Get-Item $hkcu).Property).Count -and
             -not @(Get-ChildItem $hkcu -ErrorAction SilentlyContinue).Count) {
             Remove-Item -Path $hkcu -Force
         }
     }
 
-    if (-not $UserOnly -and -not (Test-Admin)) { Request-Elevation -Arguments @('-Uninstall') }
+    if (-not $UserOnly -and -not (Test-Admin)) {
+        $fwd = @('-Uninstall')
+        if ($HkcuCleared -ge 0) { $fwd += @('-HkcuCleared', $HkcuCleared) }
+        Request-Elevation -Arguments $fwd
+    }
 
     Write-Head 'Removing policies'
     $targets = @($PolicyKey)
-    if (-not $UserOnly) { $targets += 'HKCU:\SOFTWARE\Policies\BraveSoftware\Brave' }
+    # Skip HKCU when the unelevated process already handled it; its hive may
+    # not even be the one this process can see.
+    if (-not $UserOnly -and $HkcuCleared -lt 0) {
+        $targets += 'HKCU:\SOFTWARE\Policies\BraveSoftware\Brave'
+    }
 
     $total = 0
     foreach ($key in $targets) {
@@ -282,10 +310,15 @@ if ($Uninstall) {
             Write-Ok "$key - $n removed, $($kept -join ' and ') left untouched"
         }
     }
+    if ($HkcuCleared -gt 0) {
+        Write-Ok "HKCU - $HkcuCleared removed before elevating"
+        $total += $HkcuCleared
+    }
     if ($total -eq 0) { Write-Warn 'none of this script''s policies were present' }
     Write-Host ''
     Write-Host 'Profile preferences are not reverted automatically.'
-    Write-Host "Restore a *.bak-* file next to Preferences / Local State if needed."
+    Write-Host "Restore *.bak-initial next to Preferences / Local State for the state"
+    Write-Host "from before this script first ran, or a *.bak-<timestamp> copy."
     return
 }
 
@@ -299,15 +332,22 @@ if (-not $UserOnly -and -not (Test-Admin)) {
 # -----------------------------------------------------------------------------
 #  Quit Brave — it rewrites its preference files on exit
 # -----------------------------------------------------------------------------
-$brave = Get-Process -Name 'brave' -ErrorAction SilentlyContinue
+# Only this session's Brave: Get-Process spans every logged-in user, so with
+# Fast User Switching or RDP the script would kill someone else's browser, or
+# wait on one it cannot close.
+$sessionId = (Get-Process -Id $PID).SessionId
+$brave = @(Get-Process -Name 'brave' -ErrorAction SilentlyContinue |
+           Where-Object { $_.SessionId -eq $sessionId })
 if ($brave) {
     Write-Head 'Quitting Brave'
     # CloseMainWindow closes one window; with several open, the next becomes
     # the main one, so this keeps asking until they are gone. Brave flushes
     # Preferences on exit and killing it mid-write corrupts profiles.
+    $hadWindow = @($brave | Where-Object { $_.MainWindowHandle -ne 0 }).Count -gt 0
     $deadline = (Get-Date).AddSeconds(10)
-    while ((Get-Date) -lt $deadline) {
-        $procs = @(Get-Process -Name 'brave' -ErrorAction SilentlyContinue)
+    while ($hadWindow -and (Get-Date) -lt $deadline) {
+        $procs = @(Get-Process -Name 'brave' -ErrorAction SilentlyContinue |
+                   Where-Object { $_.SessionId -eq $sessionId })
         if (-not $procs) { break }
         foreach ($proc in $procs) {
             # The process can exit between Get-Process and here, and
@@ -319,7 +359,12 @@ if ($brave) {
         }
         Start-Sleep -Milliseconds 300
     }
-    $still = Get-Process -Name 'brave' -ErrorAction SilentlyContinue
+    # A window closing frees its handle before the browser finishes flushing
+    # Preferences, so give it a moment rather than killing mid-write.
+    if ($hadWindow) { Start-Sleep -Seconds 2 }
+
+    $still = @(Get-Process -Name 'brave' -ErrorAction SilentlyContinue |
+               Where-Object { $_.SessionId -eq $sessionId })
     if ($still) {
         # No window to close means background mode (tray), where nothing short
         # of a kill will do; Brave shows a "did not shut down correctly" bar.
@@ -327,7 +372,8 @@ if ($brave) {
         $still | Stop-Process -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 2
     }
-    if (Get-Process -Name 'brave' -ErrorAction SilentlyContinue) {
+    if (@(Get-Process -Name 'brave' -ErrorAction SilentlyContinue |
+          Where-Object { $_.SessionId -eq $sessionId })) {
         $script:BraveAlive = $true
         Write-Warn 'could not quit Brave - profile preferences will be skipped,'
         Write-Warn 'it would overwrite them on exit. Policies still apply.'

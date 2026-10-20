@@ -158,6 +158,10 @@ the same dead ends are not explored twice.
   them, which tests nothing. The policy layer was unaffected and had been
   genuinely verified, because `brave://policy` reports names it does not
   recognise. Preferences offer no such signal, hence the rule above.
+- **2026-10-20** — the pre-elevation `HKCU` clean added in a later round ran
+  unconditionally, which produces the same symptom as the incident below and
+  has been mistaken for its cause twice. It cannot be: that code did not exist
+  yet when the values disappeared.
 - **2026-10-20** — 26 values vanished from `HKCU` between being written and
   being removed, with nothing in either script touching that hive in between.
   Cause never established. `gpupdate /force` was tested and ruled out. If it
@@ -177,11 +181,11 @@ through three reviews.
 
 Behaviour is still only verified by running the scripts.
 
-One recurring trap when editing: the PowerShell script cannot be syntax-checked
-on macOS, and its messages use typographic dashes, so a search-and-replace that
-assumes a plain hyphen silently matches nothing. Two fixes were lost that way
-and only found by the next review. Confirm every edit actually landed. PowerShell cannot be run on the macOS side, so Windows changes are
-written blind and must be exercised on a real machine.
+PowerShell cannot be run on macOS, so Windows changes are written blind and
+must be exercised on a real machine. A related trap: the script's messages use
+typographic dashes, so a search-and-replace that assumes a plain hyphen matches
+nothing and fails silently. Two fixes were lost that way and only found by the
+next review — confirm every edit actually landed.
 
 - **macOS** — run in a sandbox with `open`, `osascript`, `pkill`,
   `system_profiler` and `defaults` stubbed on `PATH`, with `HOME` and `TMPDIR` redirected. That

@@ -219,15 +219,29 @@ the same dead ends are not explored twice.
 syntax, shellcheck, PowerShell parsing, the bundled profile, `verify-keys.py`,
 and a smoke run of the macOS script with every system-touching command stubbed.
 It is the one command to run before pushing, and the one the reviewer is told
-to run. A check whose tool is missing prints `SKIP` and says which; that is not
-a pass, and anything skipped is what CI covers (shellcheck and PowerShell
-parsing need `shellcheck` and `pwsh` installed locally). It needs network,
-because `verify-keys.py` reads brave-core.
+to run. A check that cannot run prints `SKIP` with the reason; that is not a
+pass. CI covers shellcheck and PowerShell parsing (which need `shellcheck` and
+`pwsh` installed locally), but it does **not** run the smoke run, which needs
+macOS. It needs network, because `verify-keys.py` reads brave-core.
 
 The smoke run exists because the manual version of it — stubs on `PATH`,
 `HOME` and `TMPDIR` redirected — was being rebuilt by hand every round. It also
 compares the profile the script generates against the one committed, which
 `verify-keys.py` only does textually.
+
+**It seeds a stand-in Brave profile, and must.** For a while it did not, and
+the script just printed "profile not found" and skipped the entire
+preference-patching step — the largest embedded Python block — while the
+comments claimed the run exercised everything. A smoke run that never reaches
+the code says nothing about it. The seeded profile is checked by outcome on
+the files (values set, unrelated data kept, the original's mode kept, `0640`
+here on purpose so that only a real copy can pass, `.bak-initial` equal to the
+original, rotation after a second run, `ads_service` gone). A second profile is
+made to fail mid-patch with a dangling symlink where its backup must go, to
+prove two things that the success path cannot show: the temp file is removed in
+`finally`, and one profile's failure does not stop the others. That cleanup was
+once lost without anyone noticing; each of these checks was verified by
+breaking the script and watching the run fail.
 
 `tools/verify-keys.py` checks every preference and policy name against
 brave-core, that the two scripts agree on names *and values* and on which file

@@ -7,6 +7,40 @@ What each policy does and how to run the scripts is in [README.md](README.md);
 it is not repeated here. This file records *why* the design is what it is, so
 the same dead ends are not explored twice.
 
+## Definition of done
+
+This project stopped converging once "done" meant "no reviewer can find
+anything". A reviewer told to find problems in ~2800 lines always can, and each
+round of fixes added code whose own defects the next round then found: in the
+last stretch most findings were in things added by the previous round. So done
+is defined here, and the review loop stops by rule.
+
+A change is done when:
+
+1. `tools/check.sh` passes, and anything it SKIPs is named in the commit or in
+   the review's first line.
+2. Every behaviour the README promises is either covered by a check or listed
+   under *Not verified* at the end of this file.
+3. After the last change to a script, it has been run for real on its own OS.
+   The Windows script is run by hand, since nothing here can run PowerShell.
+4. One review pass reports no **blocking** finding.
+
+**Blocking** means something a user running the documented commands on a
+supported system can hit: a policy or setting with no effect or the opposite
+effect; data loss, or a file left with the wrong owner or permissions; a message
+or document that says something untrue; the primary layer (the policies)
+failing silently.
+
+**Not blocking**, and not fixed unless real use turns them up: conditions that
+need an unusual setup (several users logged in at once, a profile path with
+brackets in it, a file locked by another program), style, further hardening of
+paths that already fail loudly, and anything in `tools/` that does not make a
+check pass wrongly. They get one line in the review and are left alone.
+
+Rounds: two per change. A third only if the second found a blocking defect in
+code the first round's fix introduced. Nothing is added to `tools/` unless it
+would have caught a defect that actually got through.
+
 ## Design decisions
 
 - **macOS policies ship as a configuration profile, never as a plist written
@@ -320,3 +354,21 @@ review is what caught it.
   *not* show: seeding a key and watching the script overwrite it proves the
   flag arrived, never that the key is one Brave reads. Only the source
   settles that.
+
+## Not verified
+
+What no check or run has covered, so that nobody mistakes silence for a pass.
+
+- `-DataDirOverride` with a separate administrator account: needs two accounts,
+  never run. The parameter is accepted by name; the scenario it exists for is
+  not exercised.
+- The `$BraveAlive` path (Brave still running after the forced kill): cannot be
+  provoked on demand.
+- The `ads_service` cleanup counter: no such directory exists on any machine
+  tried, so the branch has never executed.
+- PowerShell 7: only Windows PowerShell 5.1 has been run.
+- The macOS smoke run is not in CI (it needs macOS); CI runs shellcheck and
+  PowerShell parsing, which a plain local run skips when the tools are absent.
+- Backup pruning after a successful replace on Windows (commit `542e67b`): the
+  macOS side is covered by the smoke run, the Windows side has not been run
+  since the change.

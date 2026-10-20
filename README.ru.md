@@ -199,7 +199,7 @@ curl -fsSL https://raw.githubusercontent.com/vladtvoeit/brave-debloat/main/macos
 
 | | |
 |---|---|
-| macOS 27.0.1 | Apple silicon, Brave 153 |
+| macOS 27.0.1 | Apple silicon, Brave 155 |
 | Windows 11 26H2 | PowerShell 5.1, Brave 155 |
 
 ## Лицензия

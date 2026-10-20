@@ -112,7 +112,14 @@ function Stop-WithReason {
     Write-Host ''
     foreach ($line in $Lines) { Write-Host "  $line" -ForegroundColor Yellow }
     Write-Host ''
-    exit 1
+
+    # exit would be right for a script file, but under `irm ... | iex` this
+    # code runs in the caller's own scope, where exit closes their console the
+    # instant the message appears. throw ends the run without taking the
+    # window with it; the explanation is already printed above, so the error
+    # line can stay short.
+    if ($PSCommandPath) { exit 1 }
+    throw 'brave-debloat stopped - see the explanation above.'
 }
 
 function Test-Admin {
@@ -323,7 +330,11 @@ if ($Uninstall) {
         $subs = @(Get-ChildItem $key -ErrorAction SilentlyContinue)
         if ($left.Count -eq 0 -and $subs.Count -eq 0) {
             Remove-Item -Path $key -Force
-            Write-Ok "$key - $n removed, key was left empty and deleted"
+            if ($n -gt 0) {
+                Write-Ok "$key - $n removed, key was left empty and deleted"
+            } else {
+                Write-Ok "$key - was already empty, removed"
+            }
         } elseif ($n -gt 0) {
             $kept = @()
             if ($left.Count) { $kept += "$($left.Count) values" }

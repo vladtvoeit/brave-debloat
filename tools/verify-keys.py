@@ -59,17 +59,23 @@ UPSTREAM_POLICIES = {
 }
 
 PREF = re.compile(r"""["']([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)["']""")
-PY_ENTRY = re.compile(r'"([a-z][a-z0-9_.]*)"\s*:\s*(True|False)')
-PS_ENTRY = re.compile(r"'([a-z][a-z0-9_.]*)'\s*=\s*\$(true|false)", re.I)
-PS_INDEXED = re.compile(r"\$profilePrefs\['([a-z][a-z0-9_.]*)'\]\s*=\s*\$(true|false)", re.I)
+# Anchored to the end of the line, with an optional trailing comma or comment.
+# Without that, a prefix match accepts typos that are valid syntax but wrong at
+# run time: $falsehood reads as $false, Falsehood reads as False.
+TAIL = r"\s*,?\s*(?:\#.*)?$"
+PY_ENTRY = re.compile(r'"([a-z][a-z0-9_.]*)"\s*:\s*(True|False)' + TAIL)
+PS_ENTRY = re.compile(r"'([a-z][a-z0-9_.]*)'\s*=\s*\$(true|false)" + TAIL, re.I)
+PS_INDEXED = re.compile(
+    r"\$profilePrefs\['([a-z][a-z0-9_.]*)'\]\s*=\s*\$(true|false)" + TAIL, re.I
+)
 # The value is matched literally rather than as \w+, so a typo in true/false
 # fails to parse instead of quietly becoming false.
-MAC_POLICY = re.compile(r'"([A-Za-z][A-Za-z0-9]+)\|(bool|integer)\|(true|false|\d+)"')
+MAC_POLICY = re.compile(
+    r'"([A-Za-z][A-Za-z0-9]+)\|(bool|integer)\|(true|false|\d+)"' + TAIL
+)
 # Indentation is not anchored: these are matched inside the extracted
 # $Policies block, so there is nothing else in range to match.
-WIN_POLICY = re.compile(
-    r"^\s*([A-Za-z][A-Za-z0-9]+)\s*=\s*(\d+)\s*(?:#.*)?$", re.M
-)
+WIN_POLICY = re.compile(r"([A-Za-z][A-Za-z0-9]+)\s*=\s*(\d+)" + TAIL)
 
 
 def fetch(path):
@@ -88,29 +94,32 @@ def between(text, opener, closer):
 
 
 def strict(block, pattern, where, failures):
-    """Validate a pref or policy block line by line.
+    """Validate a block line by line and return what parsed.
 
-    Also reports a name that appears twice: the callers build dictionaries, so
-    a duplicate would quietly win or lose depending on order, and on macOS it
-    would emit the same <key> twice into the .mobileconfig.
+    Matching is anchored and done per line rather than with findall over the
+    whole text, so a commented-out entry is genuinely skipped instead of being
+    harvested back out of the comment, and a line that does not parse is
+    reported rather than passed over. Duplicate names are reported too: the
+    callers build dictionaries, where one would silently win, and on macOS the
+    same <key> would be written twice into the profile.
     """
-    """Every meaningful line in a pref block must parse. A findall that simply
-    skips an unrecognised line would let a typo through silently — the exact
-    failure mode this whole script exists to prevent."""
+    found = []
+    seen = set()
     for line in block.splitlines():
         line = line.strip()
         if not line or line.startswith("#") or line in ("}", "})", "{"):
             continue
-        if not pattern.search(line):
-            failures.append(f"{where}: cannot parse line: {line}")
 
-    found = pattern.findall(block)
-    seen = set()
-    for match in found:
-        name = match[0] if isinstance(match, tuple) else match
+        match = pattern.match(line)
+        if not match:
+            failures.append(f"{where}: cannot parse line: {line}")
+            continue
+
+        name = match.group(1)
         if name in seen:
             failures.append(f"{where}: {name} appears twice")
         seen.add(name)
+        found.append(match.groups())
     return found
 
 
@@ -210,8 +219,8 @@ def main():
     # value that is not "true" as false, so a typo in the literal would pass.
     mac_policy_block = between(mac, "POLICIES=(", "\n)")
     win_policy_block = between(win, "$Policies = [ordered]@{", "\n}")
-    strict(mac_policy_block, MAC_POLICY, "macOS POLICIES", failures)
-    strict(win_policy_block, WIN_POLICY, "Windows Policies", failures)
+    mac_entries = strict(mac_policy_block, MAC_POLICY, "macOS POLICIES", failures)
+    win_entries = strict(win_policy_block, WIN_POLICY, "Windows Policies", failures)
 
     # The regex accepts any of true/false/digits after either type, so the
     # pairing is checked here: "Foo|bool|1" would otherwise read as false, and
@@ -223,7 +232,7 @@ def main():
     mac_policy_typed = {}
     mac_policy_values = {}
     mac_policy_kinds = {}
-    for name, kind, value in MAC_POLICY.findall(mac_policy_block):
+    for name, kind, value in mac_entries:
         if kind == "bool" and value in ("true", "false"):
             typed = value == "true"
         elif kind == "integer" and value.isdigit():
@@ -234,7 +243,7 @@ def main():
         mac_policy_kinds[name] = kind
         mac_policy_typed[name] = typed
         mac_policy_values[name] = int(typed)
-    win_policy_values = {name: int(value) for name, value in WIN_POLICY.findall(win_policy_block)}
+    win_policy_values = {name: int(value) for name, value in win_entries}
 
     for name in sorted(set(mac_policy_values) | set(win_policy_values)):
         if name not in win_policy_values:
@@ -269,7 +278,12 @@ def main():
                 declared.group(1)
             )
             used = mac_policy_kinds[name]
-            if yaml_kind and yaml_kind != used:
+            if yaml_kind is None:
+                failures.append(
+                    f"policy {name} has an unrecognised type in brave-core: "
+                    f"{declared.group(1)}"
+                )
+            elif yaml_kind != used:
                 failures.append(
                     f"policy {name} is {declared.group(1)} in brave-core "
                     f"({yaml_kind}) but the script writes it as {used}"

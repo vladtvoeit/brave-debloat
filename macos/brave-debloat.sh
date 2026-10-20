@@ -33,6 +33,10 @@ MANAGED="/Library/Managed Preferences/com.brave.Browser.plist"
 PROFILE_OUT="${TMPDIR:-/tmp}/brave-debloat.mobileconfig"
 TS="$(date +%Y%m%d-%H%M%S)"
 BRAVE_ALIVE=0
+# current | queued | skipped. `open` on the profile returns immediately, long
+# before anyone has clicked Install, so the closing text cannot ask the system
+# whether it is installed and expect a useful answer.
+PROFILE_STATE=skipped
 REPO="https://raw.githubusercontent.com/vladtvoeit/brave-debloat/main"
 
 WANT_PROFILE=1
@@ -119,8 +123,13 @@ def profiles(node):
             yield from profiles(value)
 
 
+try:
+    parsed = json.loads(payload)
+except ValueError:
+    sys.exit(1)
+
 installed = set()
-for profile in profiles(json.loads(payload)):
+for profile in profiles(parsed):
     for item in profile.get("_items", []):
         blob = item.get("spconfigprofile_payload_data", "")
         installed |= set(re.findall(r'^\s*"?([A-Za-z][A-Za-z0-9_]*)"?\s*=\s*', blob, re.M))
@@ -129,8 +138,13 @@ installed -= {"PayloadContent", "Forced", "mcx_preference_settings"}
 if not installed or installed != set(expected):
     sys.exit(1)
 
-with open(managed, "rb") as handle:
-    live = plistlib.load(handle)
+try:
+    with open(managed, "rb") as handle:
+        live = plistlib.load(handle)
+except Exception:
+    # Unreadable or corrupt: treat as "not current" and regenerate rather
+    # than dumping a traceback into the user's terminal.
+    sys.exit(1)
 for key, want in expected.items():
     got = live.get(key)
     if type(got) is not type(want) or got != want:
@@ -246,11 +260,13 @@ fi
 #  file there is treated as stray and deleted, typically at the next reboot.
 # -----------------------------------------------------------------------------
 if [ "$WANT_PROFILE" = "1" ] && profile_is_current; then
+  PROFILE_STATE=current
   bold "==> Configuration profile"
   ok "already installed and up to date — skipping"
   echo
 
 elif [ "$WANT_PROFILE" = "1" ]; then
+  PROFILE_STATE=queued
   bold "==> Building configuration profile"
 
   {
@@ -519,17 +535,30 @@ fi
 echo
 bold "Done. Restart Brave."
 echo
-if profile_installed; then
-  echo "  Verify:  brave://policy    — every policy listed, status OK"
-  echo "           brave://settings  — Rewards / Wallet / VPN / Leo are gone"
-else
-  # Without the profile the Brave policies do not apply at all, so promising
-  # that brave://policy looks clean would be a lie.
-  warn "no configuration profile is installed, so the policies are not in effect"
-  echo "     Brave's own policies refuse the recommended level that the"
-  echo "     user-domain fallback can offer, so Rewards, Wallet, Leo and News"
-  echo "     stay on until the profile is installed."
-fi
+case "$PROFILE_STATE" in
+  current)
+    echo "  Verify:  brave://policy    — every policy listed, status OK"
+    echo "           brave://settings  — Rewards / Wallet / VPN / Leo are gone"
+    ;;
+  queued)
+    echo "  Once the profile is installed, verify:"
+    echo "           brave://policy    — every policy listed, status OK"
+    echo "           brave://settings  — Rewards / Wallet / VPN / Leo are gone"
+    ;;
+  *)
+    if profile_installed; then
+      echo "  Verify:  brave://policy    — every policy listed, status OK"
+      echo "           brave://settings  — Rewards / Wallet / VPN / Leo are gone"
+    else
+      # Without the profile the Brave policies do not apply at all, so
+      # promising that brave://policy looks clean would be a lie.
+      warn "no configuration profile is installed, so the policies are not in effect"
+      echo "     Brave's own policies refuse the recommended level that the"
+      echo "     user-domain fallback can offer, so Rewards, Wallet, Leo and"
+      echo "     News stay on until the profile is installed."
+    fi
+    ;;
+esac
 echo
 if [ -n "$SELF" ]; then
   echo "  Revert:  $SELF_NAME --uninstall"

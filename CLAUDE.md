@@ -27,6 +27,16 @@ the same dead ends are not explored twice.
   (verified 2026-10-20), so the macOS problem has no Windows equivalent.
   `-UserOnly` writing to `HKCU` is a real option for machines without admin
   rights, not a degraded one.
+- **Every profile preference name is verified against `brave-core` before it
+  is added.** A wrong name is completely silent: Chromium persists only prefs
+  that differ from their default, so an invented key and a real key nobody has
+  touched look identical in `Preferences`. Policies have `brave://policy` to
+  catch a typo; preferences have nothing. Check the name in
+  `brave/brave-core` — `gh search code '"the.pref.name" repo:brave/brave-core'`
+  — and prefer the file that registers it, since names are retired and
+  migrated (sponsored images moved from
+  `brave.new_tab_page.show_branded_background_image` to
+  `brave.brave_ads.sponsored.enabled` in 08/2026).
 - **Policies are the primary layer; profile preferences cover only what has no
   policy** — mainly toolbar button visibility. Anything that can be done with
   a policy should be, because a policy removes the feature rather than hiding
@@ -110,6 +120,16 @@ the same dead ends are not explored twice.
   profile patching outright on Windows, via `[IO.File]::Replace`. The output
   said `skipped`, which reads as harmless; it was caught only by checking an
   actual preference value after the run. Verify effects, not exit status.
+- **2026-10-20** — a second review found that most of the profile preference
+  layer was writing key names that do not exist in `brave-core` — inherited
+  from the script this project grew out of and never checked, including every
+  key behind `--sponsored`, the daily-ping key (`brave.stats.ping_enabled`
+  instead of `brave.stats.reporting_enabled`) and Web Discovery
+  (`brave.web_discovery.enabled` instead of `brave.web_discovery_enabled`).
+  They had been "verified" by seeding them and watching the script rewrite
+  them, which tests nothing. The policy layer was unaffected and had been
+  genuinely verified, because `brave://policy` reports names it does not
+  recognise. Preferences offer no such signal, hence the rule above.
 - **2026-10-20** — 26 values vanished from `HKCU` between being written and
   being removed, with nothing in either script touching that hive in between.
   Cause never established. `gpupdate /force` was tested and ruled out. If it
@@ -136,5 +156,8 @@ written blind and must be exercised on a real machine.
   count registry values, and confirm `-Uninstall` leaves foreign policies
   alone by planting one first.
 - `-Sponsored` passing through UAC can only be tested from a *non-elevated*
-  console, with the three sponsored keys seeded to `true` beforehand —
-  otherwise a dropped flag and a working one look identical.
+  console, with the sponsored keys seeded to `true` beforehand — otherwise a
+  dropped flag and a working one look identical. Note what that test does
+  *not* show: seeding a key and watching the script overwrite it proves the
+  flag arrived, never that the key is one Brave reads. Only the source
+  settles that.

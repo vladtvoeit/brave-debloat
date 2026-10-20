@@ -302,39 +302,35 @@ import glob, json, os, shutil, sys
 data, ts, sponsored = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
 
 PROFILE = {
-    "brave.new_tab_page.show_brave_today": False,
+    # Every name here is verified against brave-core. A wrong one is silent:
+    # Chromium stores only prefs that differ from their default, so an
+    # invented key and an untouched real key look identical on disk.
     "brave.new_tab_page.show_brave_news": False,
     "brave.today.enabled": False,
-    "browser.check_default_browser": False,
     "brave.rewards.show_brave_rewards_button": False,
-    "brave.rewards.show_button": False,
+    "brave.rewards.enabled": False,
     "brave.wallet.show_wallet_icon_on_toolbar": False,
-    "brave.vpn.show_button": False,
-    "brave.ai_chat.enabled_by_user": False,
+    "brave.ai_chat.show_toolbar_button": False,
     "brave.ai_chat.autocomplete_provider_enabled": False,
     "brave.playlist.enabled": False,
-    "brave.speedreader.enabled": False,
-    "brave.wayback_machine_enabled": False,
-    "ipfs.ipfs_enabled": False,
-    "brave.p3a.enabled": False,
-    "brave.stats.ping_enabled": False,
+    "brave.web_discovery_enabled": False,
+    "browser.check_default_browser": False,  # upstream Chromium pref
 }
 
-# Opt-in: these cover sponsored (ad) wallpapers only. Brave's own stock
-# photos are controlled by show_background_image, which is never touched.
+# Opt-in. Sponsored wallpapers are ads; Brave's own stock photos are left
+# alone — those are brave.new_tab_page.show_background_image, never written.
 if sponsored:
     PROFILE.update({
-        "brave.new_tab_page.show_sponsored_images": False,
-        "brave.new_tab_page.show_branded_wallpaper": False,
-        "brave.new_tab_page.branded_wallpaper_notification": False,
+        "brave.brave_ads.sponsored.enabled": False,
+        # Retired in 08/2026 but still migrated into the pref above, so it
+        # keeps older builds covered.
+        "brave.new_tab_page.show_branded_background_image": False,
+        "brave.branded_wallpaper_notification_dismissed": True,
     })
 
 LOCAL_STATE = {
     "brave.p3a.enabled": False,
-    "brave.p3a.notice_acknowledged": True,
-    "brave.stats.ping_enabled": False,
-    "brave.rewards.enabled": False,
-    "brave.web_discovery.enabled": False,
+    "brave.stats.reporting_enabled": False,
 }
 
 

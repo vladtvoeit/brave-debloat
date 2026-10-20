@@ -33,7 +33,7 @@ Restart Brave afterwards. On macOS there is one manual step — see
 
 | Group | Turned off |
 |---|---|
-| Crypto & money | Rewards / BAT, Wallet, web3, decentralised DNS |
+| Crypto & money | Rewards / BAT, Wallet, web3 |
 | Upsells | Brave VPN button and subscription prompts |
 | AI | Leo — sidebar panel and omnibox suggestions |
 | Content features | News feed, Talk, Playlist, Speedreader, Wayback Machine |

@@ -268,39 +268,35 @@ if (-not (Test-Path -LiteralPath $DataDir)) {
 } else {
     Write-Head "Patching profile preferences (backups: *.bak-$Stamp)"
 
+    # Every name here is verified against brave-core. A wrong one is silent:
+    # Chromium stores only prefs that differ from their default, so an
+    # invented key and an untouched real key look identical on disk.
     $profilePrefs = @{
-        'brave.new_tab_page.show_brave_today'          = $false
-        'brave.new_tab_page.show_brave_news'           = $false
-        'brave.today.enabled'                          = $false
-        'browser.check_default_browser'                = $false
-        'brave.rewards.show_brave_rewards_button'      = $false
-        'brave.rewards.show_button'                    = $false
-        'brave.wallet.show_wallet_icon_on_toolbar'     = $false
-        'brave.vpn.show_button'                        = $false
-        'brave.ai_chat.enabled_by_user'                = $false
-        'brave.ai_chat.autocomplete_provider_enabled'  = $false
-        'brave.playlist.enabled'                       = $false
-        'brave.speedreader.enabled'                    = $false
-        'brave.wayback_machine_enabled'                = $false
-        'ipfs.ipfs_enabled'                            = $false
-        'brave.p3a.enabled'                            = $false
-        'brave.stats.ping_enabled'                     = $false
+        'brave.new_tab_page.show_brave_news'          = $false
+        'brave.today.enabled'                         = $false
+        'brave.rewards.show_brave_rewards_button'     = $false
+        'brave.rewards.enabled'                       = $false
+        'brave.wallet.show_wallet_icon_on_toolbar'    = $false
+        'brave.ai_chat.show_toolbar_button'           = $false
+        'brave.ai_chat.autocomplete_provider_enabled' = $false
+        'brave.playlist.enabled'                      = $false
+        'brave.web_discovery_enabled'                 = $false
+        'browser.check_default_browser'               = $false  # upstream Chromium
     }
 
-    # Opt-in: these cover sponsored (ad) wallpapers only. Brave's own stock
-    # photos are controlled by show_background_image, which is never touched.
+    # Opt-in. Sponsored wallpapers are ads; Brave's own stock photos are left
+    # alone - those are brave.new_tab_page.show_background_image, never written.
     if ($Sponsored) {
-        $profilePrefs['brave.new_tab_page.show_sponsored_images']          = $false
-        $profilePrefs['brave.new_tab_page.show_branded_wallpaper']         = $false
-        $profilePrefs['brave.new_tab_page.branded_wallpaper_notification'] = $false
+        $profilePrefs['brave.brave_ads.sponsored.enabled'] = $false
+        # Retired in 08/2026 but still migrated into the pref above, so it
+        # keeps older builds covered.
+        $profilePrefs['brave.new_tab_page.show_branded_background_image'] = $false
+        $profilePrefs['brave.branded_wallpaper_notification_dismissed']   = $true
     }
 
     $localState = @{
-        'brave.p3a.enabled'            = $false
-        'brave.p3a.notice_acknowledged' = $true
-        'brave.stats.ping_enabled'     = $false
-        'brave.rewards.enabled'        = $false
-        'brave.web_discovery.enabled'  = $false
+        'brave.p3a.enabled'              = $false
+        'brave.stats.reporting_enabled'  = $false
     }
 
     Get-ChildItem -LiteralPath $DataDir -Directory -ErrorAction SilentlyContinue |

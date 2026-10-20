@@ -33,7 +33,7 @@ irm https://raw.githubusercontent.com/vladtvoeit/brave-debloat/main/windows/brav
 
 | Группа | Что выключено |
 |---|---|
-| Крипта и деньги | Rewards / BAT, Wallet, web3, децентрализованный DNS |
+| Крипта и деньги | Rewards / BAT, Wallet, web3 |
 | Апселлы | Кнопка Brave VPN и предложения подписки |
 | ИИ | Leo — панель в сайдбаре и подсказки в адресной строке |
 | Контентные функции | Лента новостей, Talk, Playlist, Speedreader, Wayback Machine |

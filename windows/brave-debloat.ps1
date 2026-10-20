@@ -105,6 +105,16 @@ $Policies = [ordered]@{
     PrivacySandboxSiteEnabledAdsEnabled     = 0
 }
 
+# throw dumps a stack trace, CategoryInfo and FullyQualifiedErrorId over the
+# message. For something a person reads and acts on, that is noise.
+function Stop-WithReason {
+    param([string[]]$Lines)
+    Write-Host ''
+    foreach ($line in $Lines) { Write-Host "  $line" -ForegroundColor Yellow }
+    Write-Host ''
+    exit 1
+}
+
 function Test-Admin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
     (New-Object Security.Principal.WindowsPrincipal $id).IsInRole(
@@ -118,7 +128,16 @@ function Request-Elevation {
     param([string[]]$Arguments)
 
     if (-not $PSCommandPath) {
-        throw 'Policies need administrator rights, and this script was piped in rather than saved, so it cannot relaunch itself. Open PowerShell as administrator and run the same command again. (-UserOnly does not avoid this: Windows restricts HKCU\SOFTWARE\Policies to administrators as well; it only changes the scope from machine-wide to this account.)'
+        Stop-WithReason @(
+            'Policies need administrator rights, and this script was piped in'
+            'rather than saved, so it cannot relaunch itself.'
+            ''
+            'Open PowerShell as administrator and run the same command again.'
+            ''
+            '-UserOnly does not avoid this: Windows restricts'
+            'HKCU\SOFTWARE\Policies to administrators as well. It changes the'
+            'scope from machine-wide to this account, not the privilege.'
+        )
     }
 
     Write-Head 'Requesting administrator rights (UAC)'
@@ -254,7 +273,14 @@ function Update-PrefsFile {
 # hive only administrators may write, and discovering that after Brave has
 # been shut down helps nobody.
 if ($UserOnly -and -not (Test-Admin)) {
-    throw 'HKCU\SOFTWARE\Policies is writable only by administrators, so -UserOnly needs an elevated session too. It is not auto-elevated: if you supply a different admin account, the policies would land in that account''s hive instead of yours.'
+    Stop-WithReason @(
+        'HKCU\SOFTWARE\Policies is writable only by administrators, so'
+        '-UserOnly needs an elevated session too.'
+        ''
+        'It is deliberately not auto-elevated: if you supplied a different'
+        'admin account, the policies would land in that account''s hive'
+        'rather than yours.'
+    )
 }
 
 if ($Uninstall) {

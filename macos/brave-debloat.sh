@@ -28,12 +28,29 @@ WANT_PROFILE=1
 WANT_SPONSORED=0
 WANT_UNINSTALL=0
 
+# When piped (curl … | bash) $0 is "bash" and has no readable source, so fall
+# back to the project name for anything user-facing.
+if [ -r "$0" ] && [ "$(basename "$0")" != "bash" ]; then
+  SELF="$0"
+else
+  SELF=""
+fi
+SELF_NAME="${SELF:+$(basename "$SELF")}"
+SELF_NAME="${SELF_NAME:-brave-debloat.sh}"
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-profile) WANT_PROFILE=0 ;;
     --sponsored)  WANT_SPONSORED=1 ;;
     --uninstall)  WANT_UNINSTALL=1 ;;
-    -h|--help)    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//; /^=\{10,\}$/d'; exit 0 ;;
+    -h|--help)
+      if [ -n "$SELF" ]; then
+        sed -n '2,18p' "$SELF" | sed 's/^# \{0,1\}//; /^=\{10,\}$/d'
+      else
+        echo "brave-debloat — see https://github.com/vladtvoeit/brave-debloat"
+        echo "Options: --no-profile  --sponsored  --uninstall"
+      fi
+      exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift
@@ -338,4 +355,4 @@ echo
 echo "  Verify:  brave://policy    — every policy listed, status OK"
 echo "           brave://settings  — Rewards / Wallet / VPN / Leo are gone"
 echo
-echo "  Revert:  $(basename "$0") --uninstall"
+echo "  Revert:  $SELF_NAME --uninstall"

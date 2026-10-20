@@ -48,11 +48,15 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$BraveAlive = $false
 
 $PolicyKey = if ($UserOnly) { 'HKCU:\SOFTWARE\Policies\BraveSoftware\Brave' }
              else           { 'HKLM:\SOFTWARE\Policies\BraveSoftware\Brave' }
 $DataDir   = if ($DataDirOverride) { $DataDirOverride }
              else { Join-Path $env:LOCALAPPDATA 'BraveSoftware\Brave-Browser\User Data' }
+# A trailing backslash would escape the closing quote when this is handed to
+# the elevated process on the command line.
+$DataDir   = $DataDir.TrimEnd('\')
 $Stamp     = Get-Date -Format 'yyyyMMdd-HHmmss'
 
 function Write-Head { param([string]$Text) Write-Host "==> $Text" -ForegroundColor White }
@@ -140,6 +144,16 @@ function Set-DeepValue {
     $cur | Add-Member -NotePropertyName $parts[-1] -NotePropertyValue $Value -Force
 }
 
+# Which profile a path belongs to, for messages. Ordinal-insensitive because
+# -DataDirOverride may arrive spelled differently than $_.FullName.
+function Get-RelativePath {
+    param([string]$Path)
+    if ($Path.StartsWith($DataDir, [StringComparison]::OrdinalIgnoreCase)) {
+        return $Path.Substring($DataDir.Length).TrimStart('\')
+    }
+    return $Path
+}
+
 function Update-PrefsFile {
     param([string]$Path, [hashtable]$Prefs)
 
@@ -149,7 +163,18 @@ function Update-PrefsFile {
         $json = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
         $doc  = $json | ConvertFrom-Json
     } catch {
-        Write-Warn "skipped $(Split-Path $Path -Leaf): $($_.Exception.Message)"
+        # This is where PowerShell 5.1's ConvertFrom-Json gives out, and it
+        # does so on things Chromium legitimately writes: an empty-string
+        # dictionary key, keys differing only in case, and anything past the
+        # 2 MB JavaScriptSerializer limit.
+        Write-Warn "NOT PATCHED - $(Get-RelativePath $Path): $($_.Exception.Message)"
+        return
+    }
+
+    # An empty file does not throw; ConvertFrom-Json just returns $null, and
+    # the failure would surface later as a confusing error inside Set-DeepValue.
+    if ($null -eq $doc) {
+        Write-Warn "NOT PATCHED - $(Get-RelativePath $Path): file is empty"
         return
     }
 
@@ -178,18 +203,36 @@ function Update-PrefsFile {
         # an empty-string dictionary key, keys differing only in case, and
         # anything past the 2 MB JavaScriptSerializer limit. Say so loudly --
         # "skipped" reads as harmless and this means the file was not patched.
-        Write-Warn "NOT PATCHED - $(Split-Path $Path -Leaf): $($_.Exception.Message)"
+        Write-Warn "NOT PATCHED - $(Get-RelativePath $Path): $($_.Exception.Message)"
         return
     }
 
-    $rel = if ($Path.StartsWith($DataDir)) { $Path.Substring($DataDir.Length).TrimStart('\') } else { $Path }
-    Write-Ok $rel
+    Write-Ok (Get-RelativePath $Path)
 }
 
 # -----------------------------------------------------------------------------
 #  Uninstall
 # -----------------------------------------------------------------------------
 if ($Uninstall) {
+    # HKCU must be cleared before elevating: a standard user who types a
+    # separate admin's password gets that admin's hive afterwards, and their
+    # own user-level policies would survive untouched.
+    $hkcu = 'HKCU:\SOFTWARE\Policies\BraveSoftware\Brave'
+    if (Test-Path $hkcu) {
+        $n = 0
+        foreach ($name in $Policies.Keys) {
+            if ($null -ne (Get-ItemProperty -Path $hkcu -Name $name -ErrorAction SilentlyContinue)) {
+                Remove-ItemProperty -Path $hkcu -Name $name -Force
+                $n++
+            }
+        }
+        if ($n) { Write-Ok "$hkcu - $n removed (before elevating)" }
+        if (-not @((Get-Item $hkcu).Property).Count -and
+            -not @(Get-ChildItem $hkcu -ErrorAction SilentlyContinue).Count) {
+            Remove-Item -Path $hkcu -Force
+        }
+    }
+
     if (-not $UserOnly -and -not (Test-Admin)) { Request-Elevation -Arguments @('-Uninstall') }
 
     Write-Head 'Removing policies'
@@ -254,8 +297,12 @@ if ($brave) {
         $procs = @(Get-Process -Name 'brave' -ErrorAction SilentlyContinue)
         if (-not $procs) { break }
         foreach ($proc in $procs) {
-            $proc.Refresh()
-            if ($proc.MainWindowHandle -ne 0) { $proc.CloseMainWindow() | Out-Null }
+            # The process can exit between Get-Process and here, and
+            # $ErrorActionPreference = 'Stop' would make that fatal.
+            try {
+                $proc.Refresh()
+                if ($proc.MainWindowHandle -ne 0) { $proc.CloseMainWindow() | Out-Null }
+            } catch { }
         }
         Start-Sleep -Milliseconds 300
     }
@@ -265,7 +312,12 @@ if ($brave) {
         # of a kill will do; Brave shows a "did not shut down correctly" bar.
         Write-Warn 'no window would close (background mode?) - forcing'
         $still | Stop-Process -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 1
+        Start-Sleep -Seconds 2
+    }
+    if (Get-Process -Name 'brave' -ErrorAction SilentlyContinue) {
+        $script:BraveAlive = $true
+        Write-Warn 'could not quit Brave - profile preferences will be skipped,'
+        Write-Warn 'it would overwrite them on exit. Policies still apply.'
     }
 }
 
@@ -303,6 +355,7 @@ if (-not (Test-Path -LiteralPath $DataDir)) {
         'brave.brave_vpn.show_button'                 = $false
         'brave.new_tab_page.show_rewards'              = $false
         'brave.new_tab_page.show_brave_vpn'            = $false
+        'brave.new_tab_page.show_together'             = $false
         'brave.ai_chat.show_toolbar_button'           = $false
         'brave.ai_chat.autocomplete_provider_enabled' = $false
         'brave.playlist.enabled'                      = $false

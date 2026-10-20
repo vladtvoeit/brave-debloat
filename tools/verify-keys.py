@@ -27,6 +27,7 @@ HEADERS = [
     "components/brave_ads/core/public/prefs/pref_names.h",
     "components/brave_news/common/pref_names.h",
     "components/brave_rewards/core/pref_names.h",
+    "components/brave_talk/pref_names.h",
     "components/brave_vpn/common/pref_names.h",
     "components/brave_wallet/browser/pref_names.h",
     "components/constants/pref_names.h",
@@ -56,6 +57,9 @@ UPSTREAM_POLICIES = {
 }
 
 PREF = re.compile(r"""["']([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)["']""")
+PY_ENTRY = re.compile(r'"([a-z][a-z0-9_.]*)"\s*:\s*(True|False)')
+PS_ENTRY = re.compile(r"'([a-z][a-z0-9_.]*)'\s*=\s*\$(true|false)", re.I)
+PS_INDEXED = re.compile(r"\$profilePrefs\['([a-z][a-z0-9_.]*)'\]\s*=\s*\$(true|false)", re.I)
 MAC_POLICY = re.compile(r'"([A-Za-z][A-Za-z0-9]+)\|(?:bool|integer)\|')
 WIN_POLICY = re.compile(r"^\s{4}([A-Za-z][A-Za-z0-9]+)\s*=\s*\d", re.M)
 
@@ -68,6 +72,30 @@ def fetch(path):
         if exc.code == 404:
             return None
         raise
+
+
+def between(text, opener, closer):
+    start = text.index(opener) + len(opener)
+    return text[start:text.index(closer, start)]
+
+
+def grouped_prefs(mac, win):
+    """The three pref groups per platform, with values, so the scripts cannot
+    drift in what they set or where they set it — only names were compared
+    before, and a True where a False belongs would have passed."""
+    to_bool = lambda s: s.lower() == "true"
+
+    mac_groups = {
+        "profile": {k: to_bool(v) for k, v in PY_ENTRY.findall(between(mac, "PROFILE = {", "\n}"))},
+        "sponsored": {k: to_bool(v) for k, v in PY_ENTRY.findall(between(mac, "PROFILE.update({", "})"))},
+        "local_state": {k: to_bool(v) for k, v in PY_ENTRY.findall(between(mac, "LOCAL_STATE = {", "\n}"))},
+    }
+    win_groups = {
+        "profile": {k: to_bool(v) for k, v in PS_ENTRY.findall(between(win, "$profilePrefs = @{", "\n    }"))},
+        "sponsored": {k: to_bool(v) for k, v in PS_INDEXED.findall(win)},
+        "local_state": {k: to_bool(v) for k, v in PS_ENTRY.findall(between(win, "$localState = @{", "\n    }"))},
+    }
+    return mac_groups, win_groups
 
 
 def read(path):
@@ -90,16 +118,33 @@ def main():
 
     failures = []
 
-    mac_prefs = set(PREF.findall(mac)) - UPSTREAM_PREFS
-    win_prefs = set(PREF.findall(win)) - UPSTREAM_PREFS
+    mac_groups, win_groups = grouped_prefs(mac, win)
+
+    for group in ("profile", "sponsored", "local_state"):
+        left, right = mac_groups[group], win_groups[group]
+        for name in sorted(set(left) | set(right)):
+            if name not in right:
+                failures.append(f"{group}: macOS sets {name}, Windows does not")
+            elif name not in left:
+                failures.append(f"{group}: Windows sets {name}, macOS does not")
+            elif left[name] != right[name]:
+                failures.append(
+                    f"{group}: {name} is {left[name]} on macOS, {right[name]} on Windows"
+                )
+
+    # A key in the wrong dict is written to the wrong file and does nothing.
+    for group in ("profile", "sponsored", "local_state"):
+        for other in ("profile", "sponsored", "local_state"):
+            if other <= group:
+                continue
+            for name in sorted(set(mac_groups[group]) & set(mac_groups[other])):
+                failures.append(f"{name} appears in both {group} and {other}")
+
+    mac_prefs = set().union(*mac_groups.values()) - UPSTREAM_PREFS
+    win_prefs = set().union(*win_groups.values()) - UPSTREAM_PREFS
     for name in sorted(mac_prefs | win_prefs):
         if name not in known:
             failures.append(f"pref does not exist in brave-core: {name}")
-
-    if mac_prefs != win_prefs:
-        for name in sorted(mac_prefs ^ win_prefs):
-            where = "macOS only" if name in mac_prefs else "Windows only"
-            failures.append(f"the two scripts disagree ({where}): {name}")
 
     mac_policies = {m.group(1) for m in MAC_POLICY.finditer(mac)}
     win_policies = set(WIN_POLICY.findall(win))

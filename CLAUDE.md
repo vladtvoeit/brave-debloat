@@ -107,6 +107,22 @@ the same dead ends are not explored twice.
     `[Environment]::CurrentDirectory` is involved. Either pass
     `[NullString]::Value` or, as here, use `Move-Item -Force` — a single
     rename on one volume, with no null to bind.
+- **`set -o pipefail` plus `grep -q` is a trap.** `grep -q` exits at the
+  first match, the producer takes `SIGPIPE`, and the pipeline reports 141 —
+  so a successful search reads as a failure. It bit `profile_is_current`,
+  where it would have meant "profile not installed" on any Mac with enough
+  configuration profiles to fill the pipe buffer. Capture the output into a
+  variable and match on that instead; `grep >/dev/null` is not a reliable fix.
+- **Never run the macOS script with `sudo`.** It needs no root, and under it
+  `os.replace` leaves `Preferences` owned by `root` — `shutil.copymode` copies
+  the mode, not the owner — after which Brave cannot read its own profile,
+  while `defaults write` goes to `/var/root`. The script refuses to start as
+  root for this reason.
+- **`$0` is not a path when the script is piped.** Three separate reviews have
+  reported that `curl … | sh` puts `/bin/sh` in `$0`, so `[ -r "$0" ]` passes
+  and `--help` would `sed` a binary. It does not: `$0` is the bare word `sh`,
+  `zsh` or `bash` in every piped form, including `sh < file`, and the guard
+  short-circuits. Verified three times; do not "fix" it again.
 - **`raw.githubusercontent.com` caches branch URLs for minutes.** After a push,
   a one-line install can still fetch the previous version — this produced a
   bug report for code that had already been fixed. To test a fresh commit, use
@@ -150,8 +166,11 @@ the same dead ends are not explored twice.
 ## Testing
 
 `tools/verify-keys.py` checks every preference and policy name against
-brave-core, that the two scripts agree with each other, and that the bundled
-`.mobileconfig` has not drifted from the policy list in the shell script. CI
+brave-core, that the two scripts agree on names *and values* and on which file
+each pref goes to, that no pref appears in two groups at once, and that the
+bundled `.mobileconfig` has not drifted from the policy list in the shell
+script. Comparing names alone was not enough — it passed a key that only one
+platform set. CI
 runs it on every push and weekly, since Brave retires names over time. Run it
 before touching either key list — it catches exactly the class of bug that got
 through three reviews.

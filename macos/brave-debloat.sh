@@ -17,6 +17,15 @@
 
 set -euo pipefail
 
+# Running as root would leave Preferences owned by root (copymode copies the
+# mode, not the owner), and send `defaults write` to /var/root. Neither is
+# recoverable without noticing first.
+if [ "$(id -u)" -eq 0 ]; then
+  echo "Run this as your normal user, not with sudo." >&2
+  echo "Nothing here needs root; the profile is installed from System Settings." >&2
+  exit 1
+fi
+
 DOMAIN="com.brave.Browser"
 APP="Brave Browser"
 DATA="$HOME/Library/Application Support/BraveSoftware/Brave-Browser"
@@ -68,8 +77,14 @@ profile_is_current() {
   # The plist alone is not proof: an older version of this script wrote one
   # by hand, and macOS deletes those at the next reboot. Require the profile
   # to actually be installed.
-  system_profiler SPConfigurationProfileDataType 2>/dev/null \
-    | grep -q "com.local.brave-debloat" || return 1
+  # Not piped into grep on purpose: grep -q exits at the first match, the
+  # producer takes SIGPIPE, and pipefail turns that into "not installed".
+  local installed
+  installed="$(system_profiler SPConfigurationProfileDataType 2>/dev/null)" || return 1
+  case "$installed" in
+    *com.local.brave-debloat*) ;;
+    *) return 1 ;;
+  esac
   [ -f "$MANAGED" ] || return 1
   plutil -convert json -o - "$MANAGED" 2>/dev/null | python3 -c '
 import json, sys
@@ -159,23 +174,23 @@ fi
 # -----------------------------------------------------------------------------
 #  Quit Brave — it rewrites its preference files on exit
 # -----------------------------------------------------------------------------
-if pgrep -x "$APP" >/dev/null 2>&1; then
+if pgrep -u "$(id -u)" -x "$APP" >/dev/null 2>&1; then
   bold "==> Quitting $APP"
   osascript -e "tell application \"$APP\" to quit" >/dev/null 2>&1 || true
 
   # Brave flushes Preferences on exit; killing it mid-write is how profiles
   # get corrupted. Give it up to 10s, force only if it hangs.
   waited=0
-  while pgrep -x "$APP" >/dev/null 2>&1 && [ "$waited" -lt 50 ]; do
+  while pgrep -u "$(id -u)" -x "$APP" >/dev/null 2>&1 && [ "$waited" -lt 50 ]; do
     sleep 0.2
     waited=$((waited + 1))
   done
-  if pgrep -x "$APP" >/dev/null 2>&1; then
+  if pgrep -u "$(id -u)" -x "$APP" >/dev/null 2>&1; then
     warn "still running after 10s — forcing"
-    pkill -x "$APP" >/dev/null 2>&1 || true
+    pkill -u "$(id -u)" -x "$APP" >/dev/null 2>&1 || true
     sleep 2
   fi
-  if pgrep -x "$APP" >/dev/null 2>&1; then
+  if pgrep -u "$(id -u)" -x "$APP" >/dev/null 2>&1; then
     BRAVE_ALIVE=1
     warn "could not quit $APP — profile preferences will be skipped,"
     warn "it would overwrite them on exit. Policies still apply."
@@ -331,6 +346,7 @@ PROFILE = {
     "brave.brave_vpn.show_button": False,
     "brave.new_tab_page.show_rewards": False,
     "brave.new_tab_page.show_brave_vpn": False,
+    "brave.new_tab_page.show_together": False,
     "brave.ai_chat.show_toolbar_button": False,
     "brave.ai_chat.autocomplete_provider_enabled": False,
     "brave.playlist.enabled": False,

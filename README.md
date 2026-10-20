@@ -170,12 +170,25 @@ curl -fsSL https://raw.githubusercontent.com/vladtvoeit/brave-debloat/main/macos
 - Re-run after major Brave updates: new releases add new features, and
   occasionally new preference keys that default to on.
 - Policy names follow Brave's published policy list. A policy your Brave
-  version does not know is simply ignored.
+  version does not know is simply ignored — `brave://policy` flags it as
+  *Unknown policy*, which is the quickest way to catch a typo. (`IPFSEnabled`
+  is the real name; `BraveIPFSEnabled`, which circulates in other scripts,
+  silently does nothing.)
+- Brave 155 marks five of these as deprecated: `IPFSEnabled`,
+  `PromotionalTabsEnabled` and the three `PrivacySandbox*` ones. They still
+  apply, and they still matter on older builds, so they are kept.
 - Brave will start reporting that it is "managed by your organization". That
   is expected — the organisation is you.
 - Run from a script file, the Windows version requests elevation itself via
   UAC. Piped through `iex` it cannot, so start an administrator PowerShell
   first, or use `-UserOnly`.
+
+## Tested on
+
+| | |
+|---|---|
+| macOS 27.0.1 | Apple silicon, Brave 153 |
+| Windows 11 26H2 | PowerShell 5.1, Brave 155 |
 
 ## License
 

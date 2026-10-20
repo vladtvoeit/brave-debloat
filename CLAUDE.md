@@ -369,6 +369,15 @@ What no check or run has covered, so that nobody mistakes silence for a pass.
 - PowerShell 7: only Windows PowerShell 5.1 has been run.
 - The macOS smoke run is not in CI (it needs macOS); CI runs shellcheck and
   PowerShell parsing, which a plain local run skips when the tools are absent.
+- Whether the profile-preference layer is needed at all. The policies are the
+  primary layer; the preference layer was kept on the assumption that they
+  leave some toolbar buttons and new-tab cards visible, and nobody has looked
+  at a pristine profile with only the policies applied. That layer accounts
+  for most of the defects found so far and a large share of the tooling, so the
+  answer matters. The test is cheap and does not touch the real profile: start
+  Brave with `--user-data-dir` pointing at an empty temporary directory
+  (policies apply machine-wide) and compare toolbar and new-tab page. Skipped on
+  2026-10-21 by decision, not because it was tried and failed.
 - Backup pruning after a successful replace on Windows (commit `542e67b`): the
   macOS side is covered by the smoke run, the Windows side has not been run
   since the change.

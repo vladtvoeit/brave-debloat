@@ -145,8 +145,10 @@ not merely switched off.
 On macOS the configuration profile is removed by hand:
 **System Settings → General → Device Management → Brave Debloat → remove.**
 
-Profile preferences are not reverted automatically — restore a `*.bak-*` file
-next to `Preferences` / `Local State` if you want them back.
+Profile preferences are not reverted automatically — restore a backup from
+next to `Preferences` / `Local State` if you want them back. Each run keeps
+`*.bak-initial`, the state from before the very first run, plus the two most
+recent copies; older ones are pruned, since `Preferences` runs to megabytes.
 
 ---
 

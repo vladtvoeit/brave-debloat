@@ -179,7 +179,24 @@ function Update-PrefsFile {
     }
 
     try {
+        # Keep the untouched original forever, plus the two most recent
+        # copies. Preferences runs to megabytes and the README tells people to
+        # re-run after Brave updates, so otherwise the profile directory fills
+        # with copies of already-patched state and the one worth having, from
+        # before the first run, scrolls away.
+        $stamped = @(Get-ChildItem "$Path.bak-2*" -ErrorAction SilentlyContinue | Sort-Object Name)
+        $initial = "$Path.bak-initial"
+        if (-not (Test-Path -LiteralPath $initial)) {
+            $source = if ($stamped.Count) { $stamped[0].FullName } else { $Path }
+            Copy-Item -LiteralPath $source -Destination $initial -Force
+        }
+
         Copy-Item -LiteralPath $Path -Destination "$Path.bak-$Stamp" -Force
+
+        $stamped = @(Get-ChildItem "$Path.bak-2*" -ErrorAction SilentlyContinue | Sort-Object Name)
+        if ($stamped.Count -gt 2) {
+            $stamped[0..($stamped.Count - 3)] | Remove-Item -Force -ErrorAction SilentlyContinue
+        }
         foreach ($key in $Prefs.Keys) { Set-DeepValue -Root $doc -Path $key -Value $Prefs[$key] }
 
         # Depth must be generous: Brave's Preferences nest well past the default

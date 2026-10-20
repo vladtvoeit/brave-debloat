@@ -390,6 +390,26 @@ def deep_set(doc, dotted, value):
     cur[keys[-1]] = value
 
 
+def keep_backups(path):
+    """Keep the untouched original forever, plus the two most recent copies.
+
+    Preferences runs to megabytes and the README tells people to re-run after
+    Brave updates, so without this the profile directory fills up with copies
+    of already-patched state — and the one worth having, from before the first
+    run, is the one that scrolls away."""
+    stamped = sorted(glob.glob(f"{path}.bak-2*"))
+    initial = f"{path}.bak-initial"
+    if not os.path.exists(initial):
+        shutil.copy2(stamped[0] if stamped else path, initial)
+
+    shutil.copy2(path, f"{path}.bak-{ts}")
+    for stale in sorted(glob.glob(f"{path}.bak-2*"))[:-2]:
+        try:
+            os.unlink(stale)
+        except OSError:
+            pass
+
+
 def patch(path, prefs):
     try:
         with open(path, encoding="utf-8") as fh:
@@ -398,7 +418,7 @@ def patch(path, prefs):
         print(f"   ! skipped {os.path.relpath(path, data)}: {exc}")
         return
     try:
-        shutil.copy2(path, f"{path}.bak-{ts}")
+        keep_backups(path)
         for key, value in prefs.items():
             deep_set(doc, key, value)
         # Write-then-rename: open(path, "w") truncates immediately, so a

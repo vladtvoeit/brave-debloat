@@ -13,6 +13,7 @@ check here is an exact match on the quoted string.
     python3 tools/verify-keys.py
 """
 
+import ast
 import pathlib
 import plistlib
 import re
@@ -66,7 +67,9 @@ PS_INDEXED = re.compile(r"\$profilePrefs\['([a-z][a-z0-9_.]*)'\]\s*=\s*\$(true|f
 MAC_POLICY = re.compile(r'"([A-Za-z][A-Za-z0-9]+)\|(bool|integer)\|(true|false|\d+)"')
 # Indentation is not anchored: these are matched inside the extracted
 # $Policies block, so there is nothing else in range to match.
-WIN_POLICY = re.compile(r"^\s*([A-Za-z][A-Za-z0-9]+)\s*=\s*(\d+)", re.M)
+WIN_POLICY = re.compile(
+    r"^\s*([A-Za-z][A-Za-z0-9]+)\s*=\s*(\d+)\s*(?:#.*)?$", re.M
+)
 
 
 def fetch(path):
@@ -85,6 +88,12 @@ def between(text, opener, closer):
 
 
 def strict(block, pattern, where, failures):
+    """Validate a pref or policy block line by line.
+
+    Also reports a name that appears twice: the callers build dictionaries, so
+    a duplicate would quietly win or lose depending on order, and on macOS it
+    would emit the same <key> twice into the .mobileconfig.
+    """
     """Every meaningful line in a pref block must parse. A findall that simply
     skips an unrecognised line would let a typo through silently — the exact
     failure mode this whole script exists to prevent."""
@@ -94,7 +103,15 @@ def strict(block, pattern, where, failures):
             continue
         if not pattern.search(line):
             failures.append(f"{where}: cannot parse line: {line}")
-    return pattern.findall(block)
+
+    found = pattern.findall(block)
+    seen = set()
+    for match in found:
+        name = match[0] if isinstance(match, tuple) else match
+        if name in seen:
+            failures.append(f"{where}: {name} appears twice")
+        seen.add(name)
+    return found
 
 
 def grouped_prefs(mac, win, failures):
@@ -122,6 +139,8 @@ def grouped_prefs(mac, win, failures):
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
+PY_BLOCK = re.compile(r"<<'PY'\n(.*?)\nPY\n", re.S)
+
 
 def read(path):
     with open(ROOT / path, encoding="utf-8") as handle:
@@ -142,6 +161,18 @@ def main():
             return 1
         known.update(PREF.findall(body))
     print(f"  {len(known)} pref names read from {len(HEADERS)} brave-core files")
+
+    # Neither bash -n nor shellcheck looks inside a quoted heredoc, so a
+    # missing comma in PROFILE would surface only at run time.
+    blocks = PY_BLOCK.findall(mac)
+    if not blocks:
+        failures.append("no embedded Python blocks found — has the heredoc marker changed?")
+    for index, block in enumerate(blocks, 1):
+        try:
+            ast.parse(block)
+        except SyntaxError as exc:
+            failures.append(f"embedded Python block {index}: {exc}")
+    print(f"  {len(blocks)} embedded Python blocks parsed")
 
     mac_groups, win_groups = grouped_prefs(mac, win, failures)
 
@@ -182,11 +213,27 @@ def main():
     strict(mac_policy_block, MAC_POLICY, "macOS POLICIES", failures)
     strict(win_policy_block, WIN_POLICY, "Windows Policies", failures)
 
-    mac_policy_values = {
-        name: (1 if value == "true" else 0) if kind == "bool" else int(value)
-        for name, kind, value in MAC_POLICY.findall(mac_policy_block)
-    }
-    mac_policy_kinds = {name: kind for name, kind, _ in MAC_POLICY.findall(mac_policy_block)}
+    # The regex accepts any of true/false/digits after either type, so the
+    # pairing is checked here: "Foo|bool|1" would otherwise read as false, and
+    # "Foo|integer|true" would crash int().
+    # Typed once, here. The regex accepts any of true/false/digits after
+    # either type, so an entry is validated before use: "Foo|bool|1" would
+    # otherwise read as false, and "Foo|integer|true" would crash int() —
+    # which it did, inside the profile comparison, until this was centralised.
+    mac_policy_typed = {}
+    mac_policy_values = {}
+    mac_policy_kinds = {}
+    for name, kind, value in MAC_POLICY.findall(mac_policy_block):
+        if kind == "bool" and value in ("true", "false"):
+            typed = value == "true"
+        elif kind == "integer" and value.isdigit():
+            typed = int(value)
+        else:
+            failures.append(f"policy {name} is declared {kind} but set to {value}")
+            continue
+        mac_policy_kinds[name] = kind
+        mac_policy_typed[name] = typed
+        mac_policy_values[name] = int(typed)
     win_policy_values = {name: int(value) for name, value in WIN_POLICY.findall(win_policy_block)}
 
     for name in sorted(set(mac_policy_values) | set(win_policy_values)):
@@ -234,11 +281,7 @@ def main():
         payload = plistlib.load(handle)["PayloadContent"][0]["PayloadContent"]
     bundled = payload["com.brave.Browser"]["Forced"][0]["mcx_preference_settings"]
 
-    expected = {}
-    for name, kind, value in re.findall(
-        r'"([A-Za-z][A-Za-z0-9]+)\|(bool|integer)\|(\w+)"', mac
-    ):
-        expected[name] = value == "true" if kind == "bool" else int(value)
+    expected = mac_policy_typed
 
     for name in sorted(set(bundled) | set(expected)):
         if name not in bundled:

@@ -122,6 +122,11 @@ the same dead ends are not explored twice.
     `[Environment]::CurrentDirectory` is involved. Either pass
     `[NullString]::Value` or, as here, use `Move-Item -Force` — a single
     rename on one volume, with no null to bind.
+- **Nothing in CI reads inside a quoted heredoc.** `bash -n` and `shellcheck`
+  both skip the two embedded Python blocks, so a missing comma in `PROFILE`
+  would pass every check and fail at run time. `tools/verify-keys.py` now runs
+  `ast.parse` over them, which is why both blocks are `<<'PY'` heredocs rather
+  than one of them being `python3 -c '…'`.
 - **`set -o pipefail` plus `grep -q` is a trap**, and knowing it is not
   enough: it was documented here and then written again two rounds later, in
   the `--uninstall` path, where a Mac with enough profiles would have stopped

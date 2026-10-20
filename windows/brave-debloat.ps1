@@ -258,9 +258,6 @@ if ($UserOnly -and -not (Test-Admin)) {
 }
 
 if ($Uninstall) {
-    # HKCU must be cleared before elevating: a standard user who types a
-    # separate admin's password gets that admin's hive afterwards, and their
-    # own user-level policies would survive untouched.
     # No pre-elevation HKCU clean: Windows restricts HKCU\SOFTWARE\Policies
     # to administrators, so the unelevated process -- the only one that would
     # run such a block -- is refused outright. An earlier round added one on
@@ -301,7 +298,7 @@ if ($Uninstall) {
         if ($left.Count -eq 0 -and $subs.Count -eq 0) {
             Remove-Item -Path $key -Force
             Write-Ok "$key - $n removed, key was left empty and deleted"
-        } else {
+        } elseif ($n -gt 0) {
             $kept = @()
             if ($left.Count) { $kept += "$($left.Count) values" }
             if ($subs.Count) { $kept += "$($subs.Count) subkeys" }
@@ -337,6 +334,7 @@ if ($brave) {
     # CloseMainWindow closes one window; with several open, the next becomes
     # the main one, so this keeps asking until they are gone. Brave flushes
     # Preferences on exit and killing it mid-write corrupts profiles.
+    $closedAny = $false
     $deadline = (Get-Date).AddSeconds(10)
     while ((Get-Date) -lt $deadline) {
         $procs = @(Get-Process -Name 'brave' -ErrorAction SilentlyContinue |
@@ -358,27 +356,34 @@ if ($brave) {
         if (-not $windowed) { break }
         foreach ($proc in $windowed) {
             try { $proc.CloseMainWindow() | Out-Null } catch { }
+            $closedAny = $true
         }
         Start-Sleep -Milliseconds 300
     }
 
     # A window closing frees its handle before Brave finishes flushing
-    # Preferences, so allow a grace period rather than killing mid-write -
-    # and stop as soon as the processes are gone instead of always sleeping
-    # it out.
-    $grace = (Get-Date).AddSeconds(3)
-    while ((Get-Date) -lt $grace) {
-        if (-not @(Get-Process -Name 'brave' -ErrorAction SilentlyContinue |
-                   Where-Object { $_.SessionId -eq $sessionId })) { break }
-        Start-Sleep -Milliseconds 200
+    # Preferences, so wait for the processes to actually go. Only worth doing
+    # if a window was asked to close: a browser that was already sitting in
+    # the tray is not about to exit on its own, and waiting on it is three
+    # seconds spent for nothing.
+    if ($closedAny) {
+        while ((Get-Date) -lt $deadline) {
+            if (-not @(Get-Process -Name 'brave' -ErrorAction SilentlyContinue |
+                       Where-Object { $_.SessionId -eq $sessionId })) { break }
+            Start-Sleep -Milliseconds 200
+        }
     }
 
     $still = @(Get-Process -Name 'brave' -ErrorAction SilentlyContinue |
                Where-Object { $_.SessionId -eq $sessionId })
     if ($still) {
-        # No window to close means background mode (tray), where nothing short
-        # of a kill will do; Brave shows a "did not shut down correctly" bar.
-        Write-Warn 'no window would close (background mode?) - forcing'
+        if ($closedAny) {
+            Write-Warn 'still running after the windows closed - forcing'
+        } else {
+            # Nothing had a window: background mode (tray), where nothing short
+            # of a kill will do. Brave shows a "did not shut down correctly" bar.
+            Write-Warn 'no window to close (background mode) - forcing'
+        }
         $still | Stop-Process -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 2
     }
@@ -411,7 +416,7 @@ if ($BraveAlive) {
 } elseif (-not (Test-Path -LiteralPath $DataDir)) {
     Write-Warn 'Brave profile not found — skipping profile preferences'
 } else {
-    Write-Head "Patching profile preferences (backups: *.bak-$Stamp)"
+    Write-Head 'Patching profile preferences (backups alongside each file)'
 
     # Every name here is verified against brave-core. A wrong one is silent:
     # Chromium stores only prefs that differ from their default, so an

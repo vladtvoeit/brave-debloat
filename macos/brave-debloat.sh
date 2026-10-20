@@ -93,19 +93,15 @@ profile_is_current() {
   # set of our own payload instead, and the effective values from the plist.
   [ -f "$MANAGED" ] || return 1
 
-  local spfile livefile rc
-  spfile="$(mktemp)"; livefile="$(mktemp)"
-  if ! system_profiler SPConfigurationProfileDataType -json >"$spfile" 2>/dev/null \
-     || ! plutil -convert json -o - "$MANAGED" >"$livefile" 2>/dev/null; then
-    rm -f "$spfile" "$livefile"
-    return 1
-  fi
+  local sp
+  sp="$(system_profiler SPConfigurationProfileDataType -json 2>/dev/null)" || return 1
 
-  rc=0
-  python3 -c '
-import json, re, sys
+  # The payload is passed as an argument rather than through a temp file, so
+  # there is nothing to clean up if this is interrupted.
+  python3 - "$sp" "$MANAGED" "${POLICIES[@]}" <<'PY'
+import json, plistlib, re, sys
 
-payload_path, live_path = sys.argv[1], sys.argv[2]
+payload, managed = sys.argv[1], sys.argv[2]
 expected = {}
 for entry in sys.argv[3:]:
     key, kind, raw = entry.split("|")
@@ -124,24 +120,23 @@ def profiles(node):
 
 
 installed = set()
-for profile in profiles(json.load(open(payload_path))):
+for profile in profiles(json.loads(payload)):
     for item in profile.get("_items", []):
         blob = item.get("spconfigprofile_payload_data", "")
-        installed |= set(re.findall(r"^\s*\"?([A-Za-z][A-Za-z0-9_]*)\"?\s*=\s*", blob, re.M))
+        installed |= set(re.findall(r'^\s*"?([A-Za-z][A-Za-z0-9_]*)"?\s*=\s*', blob, re.M))
 installed -= {"PayloadContent", "Forced", "mcx_preference_settings"}
 
 if not installed or installed != set(expected):
     sys.exit(1)
 
-live = json.load(open(live_path))
+with open(managed, "rb") as handle:
+    live = plistlib.load(handle)
 for key, want in expected.items():
     got = live.get(key)
     if type(got) is not type(want) or got != want:
         sys.exit(1)
 sys.exit(0)
-' "$spfile" "$livefile" "${POLICIES[@]}" || rc=$?
-  rm -f "$spfile" "$livefile"
-  return $rc
+PY
 }
 
 # -----------------------------------------------------------------------------
@@ -340,7 +335,9 @@ fi
 #  2. User-domain defaults — fallback layer, no admin rights needed
 #
 #  Read by Brave as recommended-level policy. The profile above takes
-#  precedence; this keeps most settings in place if the profile is removed.
+#  precedence. This does NOT substitute for it: every Brave policy declares
+#  can_be_recommended false, so Rewards, Wallet, Leo and News ignore values
+#  that arrive this way. Only upstream Chromium policies honour them.
 # -----------------------------------------------------------------------------
 bold "==> Writing user-domain defaults"
 for entry in "${POLICIES[@]}"; do
@@ -375,7 +372,7 @@ elif ! ls "$DATA" >/dev/null 2>&1; then
   echo "     Policies above still apply — this only affects toolbar buttons"
   echo "     and a few toggles that have no policy equivalent."
 else
-  bold "==> Patching profile preferences (backups: *.bak-$TS)"
+  bold "==> Patching profile preferences (backups alongside each file)"
   python3 - "$DATA" "$TS" "$WANT_SPONSORED" <<'PY'
 import glob, json, os, shutil, sys
 
@@ -493,8 +490,12 @@ def patch(path, prefs):
     print(f"   \033[32m✔\033[0m {os.path.relpath(path, data)}")
 
 
-for profile in glob.glob(os.path.join(data, "Default", "Preferences")) + \
-               glob.glob(os.path.join(data, "Profile *", "Preferences")):
+# glob.escape on the base: a redirected HOME in a test harness, or any home
+# directory with [ or ] in it, would otherwise match nothing here and never
+# reach the escaping already done further down.
+base = glob.escape(data)
+for profile in glob.glob(os.path.join(base, "Default", "Preferences")) + \
+               sorted(glob.glob(os.path.join(base, "Profile *", "Preferences"))):
     patch(profile, PROFILE)
 
 local_state = os.path.join(data, "Local State")
@@ -518,8 +519,17 @@ fi
 echo
 bold "Done. Restart Brave."
 echo
-echo "  Verify:  brave://policy    — every policy listed, status OK"
-echo "           brave://settings  — Rewards / Wallet / VPN / Leo are gone"
+if profile_installed; then
+  echo "  Verify:  brave://policy    — every policy listed, status OK"
+  echo "           brave://settings  — Rewards / Wallet / VPN / Leo are gone"
+else
+  # Without the profile the Brave policies do not apply at all, so promising
+  # that brave://policy looks clean would be a lie.
+  warn "no configuration profile is installed, so the policies are not in effect"
+  echo "     Brave's own policies refuse the recommended level that the"
+  echo "     user-domain fallback can offer, so Rewards, Wallet, Leo and News"
+  echo "     stay on until the profile is installed."
+fi
 echo
 if [ -n "$SELF" ]; then
   echo "  Revert:  $SELF_NAME --uninstall"

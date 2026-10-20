@@ -85,14 +85,13 @@ the same dead ends are not explored twice.
   - A UTF-8 BOM makes Chromium refuse the file. Write with
     `UTF8Encoding($false)`, not `Set-Content -Encoding UTF8`.
   - `[IO.File]::Replace($tmp, $path, $null)` throws *"the path is not of a
-    legal form"*. The method is fine — it has existed since .NET 2.0 — and
-    the paths involved were absolute, so this is not the usual
-    `[Environment]::CurrentDirectory` mismatch. The likely mechanism is
-    PowerShell binding `$null` to a .NET `String` parameter as an empty
-    string, which `File.Replace` then rejects as a backup path; that is what
-    `[NullString]::Value` exists for. **Not yet confirmed by test.**
-    `Move-Item -Force` sidesteps it entirely and is a single rename on one
-    volume.
+    legal form"*, and the method is not at fault. PowerShell binds `$null`
+    to a .NET `String` parameter as an empty string, and `File.Replace`
+    rejects an empty backup path. Verified 2026-10-20: the identical call
+    with `[NullString]::Value` succeeds, so neither .NET Framework nor
+    `[Environment]::CurrentDirectory` is involved. Either pass
+    `[NullString]::Value` or, as here, use `Move-Item -Force` — a single
+    rename on one volume, with no null to bind.
 - **`raw.githubusercontent.com` caches branch URLs for minutes.** After a push,
   a one-line install can still fetch the previous version — this produced a
   bug report for code that had already been fixed. To test a fresh commit, use

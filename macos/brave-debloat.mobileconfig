@@ -9,7 +9,7 @@
 	<key>PayloadDescription</key><string>Disables Rewards, Wallet, VPN, Leo AI, News, Talk, Tor, IPFS and telemetry in Brave Browser.</string>
 	<key>PayloadScope</key><string>System</string>
 	<key>PayloadRemovalDisallowed</key><false/>
-	<key>PayloadUUID</key><string>41FD4CC4-BE31-4AB8-A100-7D9A0F4E3502</string>
+	<key>PayloadUUID</key><string>C62F5043-E28C-4667-87BC-5CA54AC432E0</string>
 	<key>PayloadContent</key>
 	<array>
 		<dict>
@@ -17,7 +17,7 @@
 			<key>PayloadVersion</key><integer>1</integer>
 			<key>PayloadIdentifier</key><string>com.local.brave-debloat.prefs</string>
 			<key>PayloadDisplayName</key><string>Brave Browser Policies</string>
-			<key>PayloadUUID</key><string>80284ACB-865C-498E-8CE8-4BF2C298C786</string>
+			<key>PayloadUUID</key><string>A452BDAF-063A-4FA6-B6C5-E0E127E5FEE6</string>
 			<key>PayloadContent</key>
 			<dict>
 				<key>com.brave.Browser</key>
@@ -31,6 +31,7 @@
 								<key>BraveWalletDisabled</key><true/>
 								<key>BraveVPNDisabled</key><true/>
 								<key>BraveAIChatEnabled</key><false/>
+								<key>BraveLocalAIEnabled</key><false/>
 								<key>BraveNewsDisabled</key><true/>
 								<key>BraveTalkDisabled</key><true/>
 								<key>BravePlaylistEnabled</key><false/>

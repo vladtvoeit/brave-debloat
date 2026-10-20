@@ -38,14 +38,21 @@
 param(
     [switch]$Sponsored,
     [switch]$UserOnly,
-    [switch]$Uninstall
+    [switch]$Uninstall,
+
+    # Set automatically when the script relaunches itself through UAC. If the
+    # user is a standard account and types a separate admin's credentials, the
+    # elevated process gets that admin's LOCALAPPDATA, and without this it
+    # would patch the wrong profile.
+    [string]$DataDirOverride
 )
 
 $ErrorActionPreference = 'Stop'
 
 $PolicyKey = if ($UserOnly) { 'HKCU:\SOFTWARE\Policies\BraveSoftware\Brave' }
              else           { 'HKLM:\SOFTWARE\Policies\BraveSoftware\Brave' }
-$DataDir   = Join-Path $env:LOCALAPPDATA 'BraveSoftware\Brave-Browser\User Data'
+$DataDir   = if ($DataDirOverride) { $DataDirOverride }
+             else { Join-Path $env:LOCALAPPDATA 'BraveSoftware\Brave-Browser\User Data' }
 $Stamp     = Get-Date -Format 'yyyyMMdd-HHmmss'
 
 function Write-Head { param([string]$Text) Write-Host "==> $Text" -ForegroundColor White }
@@ -61,6 +68,7 @@ $Policies = [ordered]@{
     BraveWalletDisabled                     = 1
     BraveVPNDisabled                        = 1
     BraveAIChatEnabled                      = 0
+    BraveLocalAIEnabled                     = 0   # on-device AI, downloads a model
     BraveNewsDisabled                       = 1
     BraveTalkDisabled                       = 1
     BravePlaylistEnabled                    = 0
@@ -166,7 +174,11 @@ function Update-PrefsFile {
         if ($tmp -and (Test-Path -LiteralPath $tmp)) {
             Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
         }
-        Write-Warn "skipped $(Split-Path $Path -Leaf): $($_.Exception.Message)"
+        # PowerShell 5.1's ConvertFrom-Json chokes on things Chromium writes:
+        # an empty-string dictionary key, keys differing only in case, and
+        # anything past the 2 MB JavaScriptSerializer limit. Say so loudly --
+        # "skipped" reads as harmless and this means the file was not patched.
+        Write-Warn "NOT PATCHED - $(Split-Path $Path -Leaf): $($_.Exception.Message)"
         return
     }
 
@@ -208,7 +220,10 @@ if ($Uninstall) {
             Remove-Item -Path $key -Force
             Write-Ok "$key - $n removed, key was left empty and deleted"
         } else {
-            Write-Ok "$key - $n removed, $($left.Count) unrelated values left untouched"
+            $kept = @()
+            if ($left.Count) { $kept += "$($left.Count) values" }
+            if ($subs.Count) { $kept += "$($subs.Count) subkeys" }
+            Write-Ok "$key - $n removed, $($kept -join ' and ') left untouched"
         }
     }
     if ($total -eq 0) { Write-Warn 'none of this script''s policies were present' }
@@ -220,7 +235,7 @@ if ($Uninstall) {
 
 # Elevate before touching anything, so Brave is not closed twice.
 if (-not $UserOnly -and -not (Test-Admin)) {
-    $fwd = @()
+    $fwd = @('-DataDirOverride', "`"$DataDir`"")
     if ($Sponsored) { $fwd += '-Sponsored' }
     Request-Elevation -Arguments $fwd
 }
@@ -231,17 +246,24 @@ if (-not $UserOnly -and -not (Test-Admin)) {
 $brave = Get-Process -Name 'brave' -ErrorAction SilentlyContinue
 if ($brave) {
     Write-Head 'Quitting Brave'
-    $brave | ForEach-Object { $_.CloseMainWindow() | Out-Null }
-
-    # Brave flushes Preferences on exit; killing it mid-write is how profiles
-    # get corrupted. Give it up to 10s, force only if it hangs.
+    # CloseMainWindow closes one window; with several open, the next becomes
+    # the main one, so this keeps asking until they are gone. Brave flushes
+    # Preferences on exit and killing it mid-write corrupts profiles.
     $deadline = (Get-Date).AddSeconds(10)
-    while ((Get-Process -Name 'brave' -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) {
-        Start-Sleep -Milliseconds 200
+    while ((Get-Date) -lt $deadline) {
+        $procs = @(Get-Process -Name 'brave' -ErrorAction SilentlyContinue)
+        if (-not $procs) { break }
+        foreach ($proc in $procs) {
+            $proc.Refresh()
+            if ($proc.MainWindowHandle -ne 0) { $proc.CloseMainWindow() | Out-Null }
+        }
+        Start-Sleep -Milliseconds 300
     }
     $still = Get-Process -Name 'brave' -ErrorAction SilentlyContinue
     if ($still) {
-        Write-Warn 'still running after 10s - forcing'
+        # No window to close means background mode (tray), where nothing short
+        # of a kill will do; Brave shows a "did not shut down correctly" bar.
+        Write-Warn 'no window would close (background mode?) - forcing'
         $still | Stop-Process -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 1
     }
@@ -279,6 +301,8 @@ if (-not (Test-Path -LiteralPath $DataDir)) {
         'brave.rewards.enabled'                       = $false
         'brave.wallet.show_wallet_icon_on_toolbar'    = $false
         'brave.brave_vpn.show_button'                 = $false
+        'brave.new_tab_page.show_rewards'              = $false
+        'brave.new_tab_page.show_brave_vpn'            = $false
         'brave.ai_chat.show_toolbar_button'           = $false
         'brave.ai_chat.autocomplete_provider_enabled' = $false
         'brave.playlist.enabled'                      = $false
@@ -308,17 +332,19 @@ if (-not (Test-Path -LiteralPath $DataDir)) {
 
     Update-PrefsFile -Path (Join-Path $DataDir 'Local State') -Prefs $localState
 
-    $junk = @(Join-Path $DataDir 'sponsored-images')
+    # "sponsored-images" is a chrome:// URL path inside Brave, not a directory,
+    # so only ads_service is ever present - and usually it is not.
+    $cleared = 0
     Get-ChildItem -LiteralPath $DataDir -Directory -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -eq 'Default' -or $_.Name -like 'Profile *' } |
         ForEach-Object {
-            $junk += (Join-Path $_.FullName 'ads_service')
-            $junk += (Join-Path $_.FullName 'sponsored-images')
+            $ads = Join-Path $_.FullName 'ads_service'
+            if (Test-Path -LiteralPath $ads) {
+                Remove-Item -LiteralPath $ads -Recurse -Force -ErrorAction SilentlyContinue
+                $cleared++
+            }
         }
-    foreach ($path in $junk) {
-        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
-    }
-    Write-Ok 'ad cache cleared'
+    if ($cleared) { Write-Ok "ad cache cleared ($cleared)" }
 }
 
 Write-Host ''

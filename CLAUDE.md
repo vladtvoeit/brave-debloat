@@ -149,12 +149,18 @@ the same dead ends are not explored twice.
 
 ## Testing
 
-Neither script is covered by automated tests; both are verified by running
-them. PowerShell cannot be run on the macOS side, so Windows changes are
+`tools/verify-keys.py` checks every preference and policy name against
+brave-core, that the two scripts agree with each other, and that the bundled
+`.mobileconfig` has not drifted from the policy list in the shell script. CI
+runs it on every push and weekly, since Brave retires names over time. Run it
+before touching either key list — it catches exactly the class of bug that got
+through three reviews.
+
+Behaviour is still only verified by running the scripts. PowerShell cannot be run on the macOS side, so Windows changes are
 written blind and must be exercised on a real machine.
 
-- **macOS** — run in a sandbox with `open`, `osascript`, `pkill` and
-  `defaults` stubbed on `PATH`, with `HOME` and `TMPDIR` redirected. That
+- **macOS** — run in a sandbox with `open`, `osascript`, `pkill`,
+  `system_profiler` and `defaults` stubbed on `PATH`, with `HOME` and `TMPDIR` redirected. That
   exercises everything except the manual profile install. Check the generated
   `.mobileconfig` with `plutil -lint` and count the policies in it.
 - **Windows** — parse first, which is the equivalent of `bash -n` and catches

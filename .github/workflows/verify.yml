@@ -1,0 +1,36 @@
+name: verify
+
+on:
+  push:
+  pull_request:
+  # Names drift: Brave retires prefs and migrates them to new ones, so this
+  # also runs on a schedule rather than only when the scripts change.
+  schedule:
+    - cron: "0 6 * * 1"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell syntax
+        run: bash -n macos/brave-debloat.sh
+
+      - name: PowerShell syntax
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path windows/brave-debloat.ps1), [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) {
+            $errors | ForEach-Object { "line $($_.Extent.StartLineNumber): $($_.Message)" }
+            exit 1
+          }
+          'syntax OK'
+
+      - name: Configuration profile is valid
+        run: python3 -c "import plistlib; plistlib.load(open('macos/brave-debloat.mobileconfig','rb')); print('plist OK')"
+
+      - name: Preference and policy names exist in brave-core
+        run: python3 tools/verify-keys.py

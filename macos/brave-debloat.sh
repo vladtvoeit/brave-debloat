@@ -23,6 +23,7 @@ DATA="$HOME/Library/Application Support/BraveSoftware/Brave-Browser"
 MANAGED="/Library/Managed Preferences/com.brave.Browser.plist"
 PROFILE_OUT="${TMPDIR:-/tmp}/brave-debloat.mobileconfig"
 TS="$(date +%Y%m%d-%H%M%S)"
+BRAVE_ALIVE=0
 REPO="https://raw.githubusercontent.com/vladtvoeit/brave-debloat/main"
 
 WANT_PROFILE=1
@@ -64,6 +65,11 @@ warn() { printf '   \033[33m!\033[0m %s\n' "$1"; }
 # True only if macOS has already materialised every expected policy from an
 # installed profile, with matching values.
 profile_is_current() {
+  # The plist alone is not proof: an older version of this script wrote one
+  # by hand, and macOS deletes those at the next reboot. Require the profile
+  # to actually be installed.
+  system_profiler SPConfigurationProfileDataType 2>/dev/null \
+    | grep -q "com.local.brave-debloat" || return 1
   [ -f "$MANAGED" ] || return 1
   plutil -convert json -o - "$MANAGED" 2>/dev/null | python3 -c '
 import json, sys
@@ -90,6 +96,7 @@ POLICIES=(
   "BraveWalletDisabled|bool|true"
   "BraveVPNDisabled|bool|true"
   "BraveAIChatEnabled|bool|false"
+  "BraveLocalAIEnabled|bool|false"        # on-device AI, downloads a model
   "BraveNewsDisabled|bool|true"
   "BraveTalkDisabled|bool|true"
   "BravePlaylistEnabled|bool|false"
@@ -166,7 +173,12 @@ if pgrep -x "$APP" >/dev/null 2>&1; then
   if pgrep -x "$APP" >/dev/null 2>&1; then
     warn "still running after 10s — forcing"
     pkill -x "$APP" >/dev/null 2>&1 || true
-    sleep 1
+    sleep 2
+  fi
+  if pgrep -x "$APP" >/dev/null 2>&1; then
+    BRAVE_ALIVE=1
+    warn "could not quit $APP — profile preferences will be skipped,"
+    warn "it would overwrite them on exit. Policies still apply."
   fi
 fi
 
@@ -256,6 +268,9 @@ TAIL
   echo "   System Settings → General → Device Management → Downloaded Profile."
   echo
   open "$PROFILE_OUT" || warn "could not open $PROFILE_OUT — open it manually"
+  # Queuing the profile only raises a notification banner, which is invisible
+  # under Do Not Disturb; this puts the right pane on screen.
+  open "x-apple.systempreferences:com.apple.Profiles-Settings.extension" 2>/dev/null || true
   echo
 fi
 
@@ -282,7 +297,9 @@ echo
 #  Needs Full Disk Access: macOS protects browser profile directories, so
 #  reading these files fails with EPERM for any app without that grant.
 # -----------------------------------------------------------------------------
-if [ ! -d "$DATA" ]; then
+if [ "$BRAVE_ALIVE" = "1" ]; then
+  :
+elif [ ! -d "$DATA" ]; then
   warn "Brave profile not found — skipping profile preferences"
 elif ! ls "$DATA" >/dev/null 2>&1; then
   bold "==> Profile preferences"
@@ -312,6 +329,8 @@ PROFILE = {
     "brave.rewards.enabled": False,
     "brave.wallet.show_wallet_icon_on_toolbar": False,
     "brave.brave_vpn.show_button": False,
+    "brave.new_tab_page.show_rewards": False,
+    "brave.new_tab_page.show_brave_vpn": False,
     "brave.ai_chat.show_toolbar_button": False,
     "brave.ai_chat.autocomplete_provider_enabled": False,
     "brave.playlist.enabled": False,
@@ -388,12 +407,14 @@ if os.path.exists(local_state):
     patch(local_state, LOCAL_STATE)
 PY
 
-  rm -rf "$DATA/sponsored-images" 2>/dev/null || true
+  # "sponsored-images" is a chrome:// URL path inside Brave, not a directory,
+  # so only ads_service is ever present — and usually it is not.
+  cleared=0
   for pdir in "$DATA"/Default "$DATA"/Profile\ *; do
-    [ -d "$pdir" ] || continue
-    rm -rf "$pdir/ads_service" "$pdir/sponsored-images" 2>/dev/null || true
+    [ -d "$pdir/ads_service" ] || continue
+    rm -rf "$pdir/ads_service" 2>/dev/null && cleared=$((cleared + 1))
   done
-  ok "ad cache cleared"
+  [ "$cleared" -gt 0 ] && ok "ad cache cleared ($cleared)" || true
 fi
 
 # -----------------------------------------------------------------------------

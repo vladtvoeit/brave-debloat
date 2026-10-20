@@ -122,6 +122,14 @@ the same dead ends are not explored twice.
     `[Environment]::CurrentDirectory` is involved. Either pass
     `[NullString]::Value` or, as here, use `Move-Item -Force` — a single
     rename on one volume, with no null to bind.
+- **Local and CI `shellcheck` are different versions, and a clean local run
+  is not a clean CI run.** A function that is only called indirectly, through
+  `run`, is reported once as SC2329 by a new shellcheck and as SC2317 on every
+  line of its body by an old one; the CI runner's is old. `tools/check.sh`
+  disables both codes on those functions. The first push of it went red for
+  exactly this reason, with 64 findings of the one code, after passing locally.
+  The old version cannot be reproduced here, so a change to that kind of
+  construct is confirmed by CI, not by the local run.
 - **Nothing in CI reads inside a quoted heredoc.** `bash -n` and `shellcheck`
   both skip the two embedded Python blocks, so a missing comma in `PROFILE`
   would pass every check and fail at run time. `tools/verify-keys.py` now runs

@@ -39,8 +39,12 @@ shell_scripts=(macos/brave-debloat.sh tools/check.sh)
 
 # bash -n parses only the first file it is given and treats the rest as
 # arguments to that script, so each one is checked on its own.
-# Called through run() below, which shellcheck cannot see.
-# shellcheck disable=SC2329
+#
+# Called through run() below, which shellcheck cannot see. Newer versions say so
+# once per function (SC2329); older ones (the CI runner's) flag every line of the
+# body as unreachable (SC2317). Both codes are disabled for the three functions
+# that are invoked this way.
+# shellcheck disable=SC2317,SC2329
 bash_syntax() {
   local script
   for script in "${shell_scripts[@]}"; do
@@ -95,7 +99,7 @@ run "verify-keys.py" python3 tools/verify-keys.py
 # rotation.
 #
 # Called through run() below, which shellcheck cannot see.
-# shellcheck disable=SC2329
+# shellcheck disable=SC2317,SC2329
 smoke_macos() {
   local sb rc=0
   sb="$(mktemp -d)" || return 1
@@ -105,7 +109,7 @@ smoke_macos() {
 }
 
 # Called by smoke_macos, which is itself only reached through run().
-# shellcheck disable=SC2329
+# shellcheck disable=SC2317,SC2329
 smoke_macos_in() {
   local sb="$1" stage c out data rc unexpected
   data="$sb/home/Library/Application Support/BraveSoftware/Brave-Browser"

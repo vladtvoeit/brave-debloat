@@ -1,5 +1,7 @@
 # brave-debloat
 
+[![verify](https://github.com/vladtvoeit/brave-debloat/actions/workflows/verify.yml/badge.svg)](https://github.com/vladtvoeit/brave-debloat/actions/workflows/verify.yml)
+
 Убирает из Brave крипту, рекламу, ИИ и телеметрию — так, чтобы настройки
 переживали перезагрузки и обновления.
 
@@ -44,7 +46,7 @@ irm https://raw.githubusercontent.com/vladtvoeit/brave-debloat/main/windows/brav
 | Privacy Sandbox | Рекламный механизм самого Chromium — измерения, запросы, реклама от сайтов |
 | Сеть | Prefetch / prerender, служба проверки орфографии |
 
-Всего 27 политик плюс набор настроек профиля для кнопок на тулбаре,
+Всего 26 политик плюс набор настроек профиля для кнопок на тулбаре,
 у которых эквивалента среди политик нет.
 
 **Не трогается:** Shields, блокировщик рекламы, автообновления, синхронизация,

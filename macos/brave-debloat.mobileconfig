@@ -43,7 +43,6 @@
 								<key>BraveStatsPingEnabled</key><false/>
 								<key>BraveWebDiscoveryEnabled</key><false/>
 								<key>MetricsReportingEnabled</key><false/>
-								<key>SafeBrowsingExtendedReportingEnabled</key><false/>
 								<key>UrlKeyedAnonymizedDataCollectionEnabled</key><false/>
 								<key>FeedbackSurveysEnabled</key><false/>
 								<key>PromotionalTabsEnabled</key><false/>

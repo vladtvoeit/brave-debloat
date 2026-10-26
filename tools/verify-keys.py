@@ -14,6 +14,7 @@ check here is an exact match on the quoted string.
 """
 
 import ast
+import base64
 import pathlib
 import plistlib
 import re
@@ -22,6 +23,11 @@ import urllib.error
 import urllib.request
 
 RAW = "https://raw.githubusercontent.com/brave/brave-core/master/"
+# Chromium's own source, for the upstream policies. Gitiles returns a file
+# base64-encoded with ?format=TEXT; the GitHub mirror's raw URLs answer 429
+# often enough to make a weekly run flaky.
+CHROMIUM = "https://chromium.googlesource.com/chromium/src/+/main/"
+POLICY_DEFINITIONS = "components/policy/resources/templates/policy_definitions/"
 
 # Headers that define the prefs these scripts touch.
 HEADERS = [
@@ -49,24 +55,28 @@ UPSTREAM_PREFS = {
 DEPRECATED_PREFS = {
     "brave.new_tab_page.show_branded_background_image",
 }
-# Upstream Chromium, so absent from brave-core and unable to be checked
-# against a YAML there. The expected type is recorded here instead, because
-# nothing else would catch one being written as the wrong kind: the
-# cross-platform comparison comes down to int(), where False and 0 are equal.
+# Upstream Chromium, so absent from brave-core: each is checked against its
+# definition in Chromium instead, which lives under a group directory that has
+# to be named here.
 UPSTREAM_POLICIES = {
-    "BackgroundModeEnabled": "bool",
-    "DefaultBrowserSettingEnabled": "bool",
-    "FeedbackSurveysEnabled": "bool",
-    "MetricsReportingEnabled": "bool",
-    "NetworkPredictionOptions": "integer",
-    "PrivacySandboxAdMeasurementEnabled": "bool",
-    "PrivacySandboxPromptEnabled": "bool",
-    "PrivacySandboxSiteEnabledAdsEnabled": "bool",
-    "PromotionalTabsEnabled": "bool",
-    "SafeBrowsingExtendedReportingEnabled": "bool",
-    "SpellCheckServiceEnabled": "bool",
-    "UrlKeyedAnonymizedDataCollectionEnabled": "bool",
+    "BackgroundModeEnabled": "Miscellaneous",
+    "DefaultBrowserSettingEnabled": "Miscellaneous",
+    "FeedbackSurveysEnabled": "Miscellaneous",
+    "MetricsReportingEnabled": "Miscellaneous",
+    "NetworkPredictionOptions": "Miscellaneous",
+    "PrivacySandboxAdMeasurementEnabled": "PrivacySandbox",
+    "PrivacySandboxPromptEnabled": "PrivacySandbox",
+    "PrivacySandboxSiteEnabledAdsEnabled": "PrivacySandbox",
+    "PromotionalTabsEnabled": "Miscellaneous",
+    "SpellCheckServiceEnabled": "Miscellaneous",
+    "UrlKeyedAnonymizedDataCollectionEnabled": "Miscellaneous",
 }
+# "chrome.*:66-144" is a closed range: the policy stopped working after M144.
+# An open one, "chrome.*:111-", is current. Deprecated policies keep an open
+# range and still work, which is why deprecation alone is not a failure.
+# Support is often listed per platform instead (chrome.win, chrome.win7,
+# chrome.mac, chrome.linux); only the entries for the two targets here count.
+CHROME_SUPPORT = re.compile(r"^\s*-\s*chrome\.(\*|win\d*|mac):\s*(\d+)-(\d*)\s*$", re.M)
 
 PREF = re.compile(r"""["']([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)["']""")
 # Anchored to the end of the line, with an optional trailing comma or comment.
@@ -97,6 +107,16 @@ def fetch(path):
     try:
         with urllib.request.urlopen(RAW + path, timeout=30) as response:
             return response.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+
+
+def fetch_chromium(path):
+    try:
+        with urllib.request.urlopen(CHROMIUM + path + "?format=TEXT", timeout=30) as response:
+            return base64.b64decode(response.read()).decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             return None
@@ -379,19 +399,28 @@ def main():
 
     for name in sorted(mac_policies | win_policies):
         if name in UPSTREAM_POLICIES:
-            want = UPSTREAM_POLICIES[name]
-            used = mac_policy_kinds.get(name)
-            if used and used != want:
-                failures.append(
-                    f"policy {name} is an upstream Chromium {want} but the "
-                    f"script writes it as {used}"
-                )
-            continue
-        path = f"components/policy/resources/templates/policy_definitions/BraveSoftware/{name}.yaml"
-        definition = fetch(path)
+            source = "Chromium"
+            definition = fetch_chromium(f"{POLICY_DEFINITIONS}{UPSTREAM_POLICIES[name]}/{name}.yaml")
+        else:
+            source = "brave-core"
+            definition = fetch(f"{POLICY_DEFINITIONS}BraveSoftware/{name}.yaml")
         if definition is None:
-            failures.append(f"policy has no definition in brave-core: {name}")
+            failures.append(f"policy has no definition in {source}: {name}")
             continue
+
+        # A removed policy shows as Error in brave://policy and does nothing.
+        # This is how SafeBrowsingExtendedReportingEnabled got through: its
+        # name was only checked for type, and Chromium closed it at M144.
+        ranges = CHROME_SUPPORT.findall(definition)
+        if not ranges:
+            failures.append(f"policy {name} has no Windows or macOS support range in {source}")
+        for platform, _, last in ranges:
+            if last:
+                failures.append(
+                    f"policy {name} is unsupported on chrome.{platform} after M{last} "
+                    f"in {source} — remove it, and add it to the retired lists in "
+                    f"both scripts so existing installs are cleaned up"
+                )
 
         # The YAML is already fetched, so the declared type is free to check.
         # Chromium spells a boolean policy "main" at the top level and an
@@ -399,7 +428,7 @@ def main():
         # inside schema:, which is why matching it here never fired.
         declared = re.search(r"^type:\s*(\S+)", definition, re.M)
         if declared is None:
-            failures.append(f"policy {name} has no type: line in brave-core")
+            failures.append(f"policy {name} has no type: line in {source}")
         elif name in mac_policy_kinds:
             yaml_kind = {"main": "bool", "int": "integer", "int-enum": "integer"}.get(
                 declared.group(1)
@@ -407,12 +436,12 @@ def main():
             used = mac_policy_kinds[name]
             if yaml_kind is None:
                 failures.append(
-                    f"policy {name} has an unrecognised type in brave-core: "
+                    f"policy {name} has an unrecognised type in {source}: "
                     f"{declared.group(1)}"
                 )
             elif yaml_kind != used:
                 failures.append(
-                    f"policy {name} is {declared.group(1)} in brave-core "
+                    f"policy {name} is {declared.group(1)} in {source} "
                     f"({yaml_kind}) but the script writes it as {used}"
                 )
 

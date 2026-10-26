@@ -142,6 +142,18 @@ would have caught a defect that actually got through.
   `brave://policy` lists it as an unknown policy. A typo in a policy name is
   invisible unless that page is checked, since Brave ignores names it does not
   know.
+- **Chromium removes policies, and a removed one fails silently.**
+  `SafeBrowsingExtendedReportingEnabled` was closed at M144 (Chromium commit of
+  2026-09-28) and showed as **Error** in `brave://policy` on the next Brave
+  update, with no other symptom. The weekly CI did not notice: upstream
+  policies were checked only for their type. `verify-keys.py` now reads every
+  policy's definition — from brave-core, or from Chromium's gitiles for the
+  upstream ones — and fails on a closed `supported_on` range for `chrome.*`,
+  `chrome.win*` or `chrome.mac`. Deprecated is not the same: a deprecated
+  policy keeps an open range and still works. A policy that is removed goes
+  into `RETIRED_POLICY_NAMES` / `$RetiredPolicies`, which both scripts delete on
+  every run and on uninstall, so the Error row also clears on machines that
+  ran an older version.
 - **Brave 155 marks five applied policies deprecated:** `IPFSEnabled`,
   `PromotionalTabsEnabled` and the three `PrivacySandbox*`. They still take
   effect and still matter on older builds, so they are kept deliberately.
@@ -307,7 +319,8 @@ anyone noticing; each of these checks was verified by breaking the script and
 watching the run fail.
 
 `tools/verify-keys.py` checks every preference and policy name against
-brave-core, that the two scripts agree on names *and values* and on which file
+brave-core (and upstream policies against Chromium), that no policy has been
+closed for Windows or macOS, that the two scripts agree on names *and values* and on which file
 each pref goes to, that no pref appears in two groups at once, and that the
 bundled `.mobileconfig` has not drifted from the policy list in the shell
 script. Comparing names alone was not enough — it passed a key that only one
@@ -367,6 +380,9 @@ What no check or run has covered, so that nobody mistakes silence for a pass.
 - The `ads_service` cleanup counter: no such directory exists on any machine
   tried, so the branch has never executed.
 - PowerShell 7: only Windows PowerShell 5.1 has been run.
+- `BackgroundModeEnabled` is defined in Chromium for Windows and Linux only.
+  On macOS it is written anyway and presumably ignored; what `brave://policy`
+  shows for it there has not been looked at.
 - The macOS smoke run is not in CI (it needs macOS); CI runs shellcheck and
   PowerShell parsing, which a plain local run skips when the tools are absent.
 - Whether the profile-preference layer is needed at all. The policies are the

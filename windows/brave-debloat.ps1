@@ -97,7 +97,6 @@ $Policies = [ordered]@{
 
     # Chromium telemetry and promos
     MetricsReportingEnabled                 = 0
-    SafeBrowsingExtendedReportingEnabled    = 0
     UrlKeyedAnonymizedDataCollectionEnabled = 0
     FeedbackSurveysEnabled                  = 0
     PromotionalTabsEnabled                  = 0
@@ -111,6 +110,13 @@ $Policies = [ordered]@{
     PrivacySandboxPromptEnabled             = 0
     PrivacySandboxSiteEnabledAdsEnabled     = 0
 }
+
+# Policies this script used to set and Chromium has since removed. A removed
+# policy shows as Error in brave://policy, so it is deleted on every run and on
+# -Uninstall, from wherever an earlier version of the script put it.
+$RetiredPolicies = @(
+    'SafeBrowsingExtendedReportingEnabled'   # unsupported after M144
+)
 
 # throw dumps a stack trace, CategoryInfo and FullyQualifiedErrorId over the
 # message. For something a person reads and acts on, that is noise.
@@ -348,7 +354,7 @@ if ($Uninstall) {
         # Counted per hive: a single total would hide which one was touched,
         # and a plain -Uninstall deliberately clears HKCU as well.
         $n = 0
-        foreach ($name in $Policies.Keys) {
+        foreach ($name in (@($Policies.Keys) + $RetiredPolicies)) {
             if ($null -ne (Get-ItemProperty -Path $key -Name $name -ErrorAction SilentlyContinue)) {
                 Remove-ItemProperty -Path $key -Name $name -Force
                 $n++
@@ -500,6 +506,9 @@ if (-not (Test-Path $PolicyKey)) { New-Item -Path $PolicyKey -Force | Out-Null }
 foreach ($name in $Policies.Keys) {
     New-ItemProperty -Path $PolicyKey -Name $name -Value $Policies[$name] `
                      -PropertyType DWord -Force | Out-Null
+}
+foreach ($name in $RetiredPolicies) {
+    Remove-ItemProperty -Path $PolicyKey -Name $name -Force -ErrorAction SilentlyContinue
 }
 Write-Ok "$($Policies.Count) policies written to $PolicyKey"
 if ($UserOnly) { Write-Warn 'user-level policies; machine-wide ones override these if present' }

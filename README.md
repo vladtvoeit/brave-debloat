@@ -1,5 +1,7 @@
 # brave-debloat
 
+[![verify](https://github.com/vladtvoeit/brave-debloat/actions/workflows/verify.yml/badge.svg)](https://github.com/vladtvoeit/brave-debloat/actions/workflows/verify.yml)
+
 Strip the crypto, ads, AI and telemetry out of Brave Browser — and make it
 stick across reboots and updates.
 
@@ -44,7 +46,7 @@ Restart Brave afterwards. On macOS there is one manual step — see
 | Privacy Sandbox | Chromium's own ad-targeting stack — measurement, prompts, site-enabled ads |
 | Network | Prefetch / prerender, spell-check service |
 
-27 policies in total, plus a set of profile preferences for toolbar buttons
+26 policies in total, plus a set of profile preferences for toolbar buttons
 that have no policy equivalent.
 
 **Not touched:** Shields, the ad blocker, auto-updates, sync, passwords,

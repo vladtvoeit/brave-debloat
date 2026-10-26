@@ -181,7 +181,6 @@ POLICIES=(
 
   # Chromium telemetry and promos
   "MetricsReportingEnabled|bool|false"
-  "SafeBrowsingExtendedReportingEnabled|bool|false"
   "UrlKeyedAnonymizedDataCollectionEnabled|bool|false"
   "FeedbackSurveysEnabled|bool|false"
   "PromotionalTabsEnabled|bool|false"
@@ -198,13 +197,21 @@ POLICIES=(
   "NetworkPredictionOptions|integer|2"
 )
 
+# Policies this script used to set and Chromium has since removed. A removed
+# policy shows as Error in brave://policy, so it is cleaned out of the user
+# domain on every run and on --uninstall. The profile needs no help: it is
+# regenerated from POLICIES, and the old one no longer counts as current.
+RETIRED_POLICY_NAMES=(
+  "SafeBrowsingExtendedReportingEnabled" # unsupported after M144
+)
+
 # -----------------------------------------------------------------------------
 #  Uninstall
 # -----------------------------------------------------------------------------
 if [ "$WANT_UNINSTALL" = "1" ]; then
   bold "==> Removing user-domain policy keys"
   removed=0
-  for entry in "${POLICIES[@]}"; do
+  for entry in "${POLICIES[@]}" "${RETIRED_POLICY_NAMES[@]}"; do
     IFS='|' read -r k _ _ <<< "$entry"
     if defaults delete "$DOMAIN" "$k" 2>/dev/null; then
       removed=$((removed + 1))
@@ -368,6 +375,9 @@ for entry in "${POLICIES[@]}"; do
     integer) defaults write "$DOMAIN" "$k" -int "$v" ;;
     *) echo "unknown policy type: $t" >&2; exit 1 ;;
   esac
+done
+for k in "${RETIRED_POLICY_NAMES[@]}"; do
+  defaults delete "$DOMAIN" "$k" 2>/dev/null || true
 done
 ok "${#POLICIES[@]} keys written to $DOMAIN"
 echo

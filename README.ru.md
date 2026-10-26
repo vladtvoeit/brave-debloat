@@ -8,7 +8,7 @@
 Brave — хороший браузер, обёрнутый в витрину. Это выключает витрину.
 Shields и автообновления не трогаются.
 
-[English version](README.md)
+[English version](README.md) · [Українська версія](README.uk.md)
 
 ---
 

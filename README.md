@@ -8,7 +8,7 @@ stick across reboots and updates.
 Brave is a good browser wrapped in a storefront. This turns off the storefront.
 Shields and auto-updates are left alone.
 
-[Русская версия](README.ru.md)
+[Українська версія](README.uk.md) · [Русская версия](README.ru.md)
 
 ---
 

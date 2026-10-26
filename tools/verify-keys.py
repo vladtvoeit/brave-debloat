@@ -19,6 +19,7 @@ import pathlib
 import plistlib
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -103,24 +104,40 @@ MAC_POLICY = re.compile(
 WIN_POLICY = re.compile(r"([A-Za-z][A-Za-z0-9]+)\s*=\s*(\d+)" + TAIL)
 
 
+def download(url):
+    """Body of url, or None when it is a 404.
+
+    The sources are other people's servers, and this runs unattended every week
+    plus on every push and tag. A 503 from one of them is not a finding about
+    this project, so rate limits and server errors are retried with a growing
+    pause before they are allowed to fail the run. A 404 is never retried: it
+    is an answer, and the callers report it as a missing definition."""
+    delays = (2, 5, 15)
+    for attempt in range(len(delays) + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                return response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return None
+            if exc.code != 429 and exc.code < 500:
+                raise
+            error = exc
+        except (urllib.error.URLError, TimeoutError) as exc:
+            error = exc
+        if attempt == len(delays):
+            raise error
+        time.sleep(delays[attempt])
+
+
 def fetch(path):
-    try:
-        with urllib.request.urlopen(RAW + path, timeout=30) as response:
-            return response.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            return None
-        raise
+    body = download(RAW + path)
+    return None if body is None else body.decode("utf-8", "replace")
 
 
 def fetch_chromium(path):
-    try:
-        with urllib.request.urlopen(CHROMIUM + path + "?format=TEXT", timeout=30) as response:
-            return base64.b64decode(response.read()).decode("utf-8", "replace")
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            return None
-        raise
+    body = download(CHROMIUM + path + "?format=TEXT")
+    return None if body is None else base64.b64decode(body).decode("utf-8", "replace")
 
 
 CPP_COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
